@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -21,14 +22,21 @@ type Result struct {
 	AllMessages []string
 }
 
-// ParseJSONL 은 `codex exec --json` 의 JSONL 출력에서 thread_id 와 agent_message 텍스트를 추출한다
-func ParseJSONL(stdout, initialThreadID string) (string, []string) {
+// maxJSONLLine 은 JSONL 한 줄의 최대 크기다 (agent_message 하나가 길 수 있다)
+const maxJSONLLine = 4 * 1024 * 1024
+
+// ParseJSONL 은 `codex exec --json` 의 JSONL 출력에서 thread_id 와 agent_message 텍스트를 추출한다.
+// 빈 줄은 건너뛰고, JSON 이 아닌 줄이나 너무 긴 줄은 오류로 돌려준다.
+func ParseJSONL(stdout, initialThreadID string) (string, []string, error) {
 	threadID := initialThreadID
 	msgs := []string{}
 	sc := bufio.NewScanner(strings.NewReader(stdout))
+	sc.Buffer(make([]byte, 64*1024), maxJSONLLine)
+	lineNumber := 0
 	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if !strings.HasPrefix(line, "{") {
+		lineNumber++
+		line := bytes.TrimSpace(sc.Bytes())
+		if len(line) == 0 {
 			continue
 		}
 		var evt struct {
@@ -39,8 +47,8 @@ func ParseJSONL(stdout, initialThreadID string) (string, []string) {
 				Text string `json:"text"`
 			} `json:"item"`
 		}
-		if err := json.Unmarshal([]byte(line), &evt); err != nil {
-			continue
+		if err := json.Unmarshal(line, &evt); err != nil {
+			return "", nil, fmt.Errorf("codex JSONL line %d: %w", lineNumber, err)
 		}
 		switch evt.Type {
 		case "thread.started":
@@ -53,7 +61,10 @@ func ParseJSONL(stdout, initialThreadID string) (string, []string) {
 			}
 		}
 	}
-	return threadID, msgs
+	if err := sc.Err(); err != nil {
+		return "", nil, fmt.Errorf("scan codex JSONL line %d: %w", lineNumber+1, err)
+	}
+	return threadID, msgs, nil
 }
 
 // Run 은 Codex 에 프롬프트를 보낸다. threadID 가 있으면 그 스레드를 이어간다.
@@ -65,7 +76,11 @@ func Run(ctx context.Context, cwd, sandbox, promptText, threadID string) (Result
 	}
 	last := lastMessage(msgs)
 	if user := gate.ActiveUser(cwd); user != "" && tid != "" && gate.NeedsReply(last) {
-		if tid2, msgs2, err2 := runOnce(ctx, cwd, sandbox, gate.Followup(user, promptText), tid); err2 == nil && len(msgs2) > 0 {
+		tid2, msgs2, err := runOnce(ctx, cwd, sandbox, gate.Followup(user, promptText), tid)
+		if err != nil {
+			return Result{}, err
+		}
+		if len(msgs2) > 0 {
 			tid, msgs, last = tid2, msgs2, lastMessage(msgs2)
 		}
 	}
@@ -88,20 +103,36 @@ func runOnce(ctx context.Context, cwd, sandbox, promptText, threadID string) (st
 		args = []string{"exec", "resume", "--skip-git-repo-check", "--json", threadID, promptText}
 	}
 	cmdName := "codex"
-	if envCmd := os.Getenv("A2A_CODEX_COMMAND"); envCmd != "" {
-		parts := strings.Fields(envCmd)
+	if parts := strings.Fields(os.Getenv("A2A_CODEX_COMMAND")); len(parts) > 0 {
 		cmdName = parts[0]
 		args = append(parts[1:], args...)
 	}
 	cmd := exec.CommandContext(ctx, cmdName, args...)
 	cmd.Dir = cwd
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &out
-	_ = cmd.Run()
-	tid, msgs := ParseJSONL(out.String(), threadID)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	runErr := cmd.Run()
+	if err := ctx.Err(); err != nil {
+		return "", nil, outputError("codex exec", err, stderr.String())
+	}
+	if runErr != nil {
+		return "", nil, outputError("codex exec", runErr, stderr.String())
+	}
+	tid, msgs, err := ParseJSONL(stdout.String(), threadID)
+	if err != nil {
+		return "", nil, outputError("parse codex exec stdout", err, stderr.String())
+	}
 	if tid == "" && len(msgs) == 0 {
-		return "", []string{}, fmt.Errorf("codex exec 출력 파싱 실패: %s", strings.TrimSpace(out.String()))
+		return "", nil, outputError("parse codex exec stdout", errors.New("no thread ID or agent messages"), stderr.String())
 	}
 	return tid, msgs, nil
+}
+
+// outputError 는 오류에 stderr 진단 내용을 덧붙인다
+func outputError(operation string, err error, stderr string) error {
+	if diagnostic := strings.TrimSpace(stderr); diagnostic != "" {
+		return fmt.Errorf("%s: %w (stderr: %s)", operation, err, diagnostic)
+	}
+	return fmt.Errorf("%s: %w", operation, err)
 }
