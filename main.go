@@ -9,6 +9,8 @@ import (
 	"time"
 )
 
+const defaultCommandTimeout = 3 * time.Minute
+
 func main() {
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "오류: %v\n", err)
@@ -38,20 +40,34 @@ func run(args []string) error {
 		defaultPool.CloseAll()
 	}()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-	defer cancel()
+	return dispatchSubcommand(context.Background(), dispatcher, cwd, args[0], args[1:])
+}
 
-	return dispatchSubcommand(ctx, dispatcher, cwd, args[0], args[1:])
+func withCommandTimeout(parent context.Context, d time.Duration) (context.Context, context.CancelFunc, error) {
+	if d <= 0 {
+		return nil, nil, fmt.Errorf("timeout은 0보다 커야 합니다: %s", d)
+	}
+	ctx, cancel := context.WithTimeout(parent, d)
+	return ctx, cancel, nil
+}
+
+func resolveWorkDir(flagVal, fallback string) string {
+	if flagVal != "" {
+		return flagVal
+	}
+	return fallback
 }
 
 func dispatchSubcommand(ctx context.Context, d *Dispatcher, cwd, sub string, rest []string) error {
 	switch sub {
 	case "mcp":
-		return RunStdioMCPServer(context.Background(), d, os.Stdin, os.Stdout)
+		return RunStdioMCPServer(ctx, d, os.Stdin, os.Stdout)
 	case "serve-a2a":
 		return runServeCmd(d, rest)
 	case "cards":
-		res, err := d.CallTool(ctx, "a2a_discover_agents", map[string]any{})
+		cmdCtx, cancel := context.WithTimeout(ctx, defaultCommandTimeout)
+		defer cancel()
+		res, err := d.CallTool(cmdCtx, "a2a_discover_agents", map[string]any{})
 		return printResult(res, err)
 	case "ask-agy":
 		return runAskAgyCmd(ctx, d, cwd, rest)
@@ -86,20 +102,27 @@ func runAskAgyCmd(ctx context.Context, d *Dispatcher, cwd string, rest []string)
 	mode := fs.String("mode", "", "실행 모드 (auto|accept-edits|plan)")
 	model := fs.String("model", "", "모델 ID")
 	noWait := fs.Bool("no-wait", false, "비동기 큐 등록 후 즉시 반환")
+	workDir := fs.String("cwd", cwd, "작업 디렉터리")
+	timeout := fs.Duration("timeout", defaultCommandTimeout, "실행 타임아웃 (예: 3m, 10m)")
 	if err := fs.Parse(rest); err != nil {
 		return err
 	}
 	if fs.NArg() < 1 {
 		return fmt.Errorf("ask-agy: 프롬프트 인자가 필요합니다")
 	}
-	res, err := d.CallTool(ctx, "acp_delegate_to_agy", map[string]any{
+	cmdCtx, cancel, err := withCommandTimeout(ctx, *timeout)
+	if err != nil {
+		return fmt.Errorf("ask-agy: %w", err)
+	}
+	defer cancel()
+	res, err := d.CallTool(cmdCtx, "acp_delegate_to_agy", map[string]any{
 		"prompt":       fs.Arg(0),
 		"session_id":   *sid,
 		"session_name": *sname,
 		"mode":         *mode,
 		"model":        *model,
 		"async":        *noWait,
-		"cwd":          cwd,
+		"cwd":          resolveWorkDir(*workDir, cwd),
 	})
 	return printResult(res, err)
 }
@@ -110,19 +133,26 @@ func runAskCodexCmd(ctx context.Context, d *Dispatcher, cwd string, rest []strin
 	sname := fs.String("s", "", "acpx 스타일의 명명 세션")
 	sandbox := fs.String("sandbox", "workspace-write", "샌드박스 모드")
 	noWait := fs.Bool("no-wait", false, "비동기 큐 등록 후 즉시 반환")
+	workDir := fs.String("cwd", cwd, "작업 디렉터리")
+	timeout := fs.Duration("timeout", defaultCommandTimeout, "실행 타임아웃 (예: 3m, 10m)")
 	if err := fs.Parse(rest); err != nil {
 		return err
 	}
 	if fs.NArg() < 1 {
 		return fmt.Errorf("ask-codex: 프롬프트 인자가 필요합니다")
 	}
-	res, err := d.CallTool(ctx, "a2a_delegate_to_codex", map[string]any{
+	cmdCtx, cancel, err := withCommandTimeout(ctx, *timeout)
+	if err != nil {
+		return fmt.Errorf("ask-codex: %w", err)
+	}
+	defer cancel()
+	res, err := d.CallTool(cmdCtx, "a2a_delegate_to_codex", map[string]any{
 		"prompt":       fs.Arg(0),
 		"thread_id":    *tid,
 		"session_name": *sname,
 		"sandbox":      *sandbox,
 		"async":        *noWait,
-		"cwd":          cwd,
+		"cwd":          resolveWorkDir(*workDir, cwd),
 	})
 	return printResult(res, err)
 }
@@ -132,9 +162,16 @@ func runSessionCtrlCmd(ctx context.Context, d *Dispatcher, cwd, sub string, rest
 	session := fs.String("s", "", "대상 세션 이름 또는 session_id")
 	mode := fs.String("mode", "auto", "모드 (auto|accept-edits|plan)")
 	model := fs.String("model", "", "모델 ID")
+	workDir := fs.String("cwd", cwd, "작업 디렉터리")
+	timeout := fs.Duration("timeout", defaultCommandTimeout, "실행 타임아웃 (예: 3m, 10m)")
 	if err := fs.Parse(rest); err != nil {
 		return err
 	}
+	cmdCtx, cancel, err := withCommandTimeout(ctx, *timeout)
+	if err != nil {
+		return fmt.Errorf("%s: %w", sub, err)
+	}
+	defer cancel()
 	target := *session
 	if target == "" && fs.NArg() > 0 {
 		target = fs.Arg(0)
@@ -147,12 +184,12 @@ func runSessionCtrlCmd(ctx context.Context, d *Dispatcher, cwd, sub string, rest
 		"set-model": "set_model",
 		"close":     "close",
 	}
-	res, err := d.CallTool(ctx, "acp_session_control", map[string]any{
+	res, err := d.CallTool(cmdCtx, "acp_session_control", map[string]any{
 		"action":  actionMap[sub],
 		"session": target,
 		"mode":    *mode,
 		"model":   *model,
-		"cwd":     cwd,
+		"cwd":     resolveWorkDir(*workDir, cwd),
 	})
 	return printResult(res, err)
 }
@@ -161,7 +198,7 @@ func runSendCmd(ctx context.Context, d *Dispatcher, rest []string) error {
 	fs := flag.NewFlagSet("send", flag.ContinueOnError)
 	from := fs.String("from", "user", "발신 에이전트 (agy|codex|user)")
 	to := fs.String("to", "codex", "수신 에이전트 (agy|codex)")
-	intent := fs.String("intent", "delegate", "메시지 의도")
+	intent := fs.String("intent", "delegate", "메시지 의도 (delegate|review|reply|chat|sync)")
 	taskID := fs.String("task-id", "", "태스크 ID")
 	if err := fs.Parse(rest); err != nil {
 		return err
@@ -169,7 +206,9 @@ func runSendCmd(ctx context.Context, d *Dispatcher, rest []string) error {
 	if fs.NArg() < 1 {
 		return fmt.Errorf("send: 메시지 본문이 필요합니다")
 	}
-	res, err := d.CallTool(ctx, "a2a_send_message", map[string]any{
+	cmdCtx, cancel := context.WithTimeout(ctx, defaultCommandTimeout)
+	defer cancel()
+	res, err := d.CallTool(cmdCtx, "a2a_send_message", map[string]any{
 		"from_agent": *from,
 		"to_agent":   *to,
 		"intent":     *intent,
@@ -188,7 +227,9 @@ func runInboxCmd(ctx context.Context, d *Dispatcher, rest []string) error {
 	if fs.NArg() < 1 {
 		return fmt.Errorf("inbox: 에이전트 ID(agy|codex)가 필요합니다")
 	}
-	res, err := d.CallTool(ctx, "a2a_receive_messages", map[string]any{
+	cmdCtx, cancel := context.WithTimeout(ctx, defaultCommandTimeout)
+	defer cancel()
+	res, err := d.CallTool(cmdCtx, "a2a_receive_messages", map[string]any{
 		"agent_id":    fs.Arg(0),
 		"unread_only": !*all,
 	})

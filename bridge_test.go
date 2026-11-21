@@ -31,6 +31,12 @@ func TestHelperMockACPServer(t *testing.T) {
 }
 
 func handleMockACPLine(sc *bufio.Scanner, env jsonRPCEnvelope) {
+	if logPath := os.Getenv("GO_WANT_MOCK_ACP_LOG"); logPath != "" {
+		if f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600); err == nil {
+			_, _ = fmt.Fprintln(f, env.Method)
+			_ = f.Close()
+		}
+	}
 	switch env.Method {
 	case "initialize":
 		fmt.Printf(`{"jsonrpc":"2.0","id":%d,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true,"sessionCapabilities":{"close":{}}}}}`+"\n", *env.ID)
