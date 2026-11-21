@@ -6,7 +6,7 @@
 
 ```sh
 # 1. 빌드 및 설치
-go build -o ~/.local/bin/a2a-acp-bridge .
+go build -o ~/.local/bin/a2a-acp-bridge ./cmd/a2a-acp-bridge
 
 # 2. AGY 및 Codex에 MCP 서버 등록
 agy mcp add a2a-acp-bridge -- ~/.local/bin/a2a-acp-bridge mcp
@@ -81,12 +81,29 @@ AI 코딩 에이전트 두 개(`agy`, `codex`)를 함께 쓸 때 프로세스를
 
 ---
 
-## 3. 소스 파일 구조
+## 3. 소스 구조
 
-모든 파일은 단일 책임 원칙에 따라 300줄 이하로 유지한다. 함수당 인지 복잡도(CC)도 15 이하로 구성했다(2026-11-22 기준 총 2,936줄).
+`cmd/` 에는 진입점만 두고, 기능은 `internal/` 패키지로 나눈다. 패키지 하나가 책임 하나를 맡고, 파일은 300줄 이하로 유지한다.
 
-| 파일 | 줄 수 | 역할 |
-| :--- | :--- | :--- |
+```
+cmd/a2a-acp-bridge/   main — cli.Run 호출만
+internal/
+  cli/                서브커맨드·플래그(-timeout, -cwd) 해석
+  dispatch/           도구 스키마(Tools)와 도구 이름 → acp·codex·board 라우팅, 비동기 큐
+  acp/                ACP 프로토콜 파서, 상주 워커, 세션 풀, session/list
+  acp/acptest/        테스트용 모의 ACP 에이전트(테스트 바이너리를 자식 프로세스로 재실행)
+  codex/              codex exec/resume JSONL 러너
+  board/              공유 보드: 태스크·메시지·명명 세션, flock + 임시 파일 원자 저장
+  agents/             A2A Agent Card
+  mcp/                MCP stdio JSON-RPC 서버
+  a2a/                A2A HTTP 서버(/.well-known/agent.json, /a2a)
+  jsonrpc/            MCP·A2A HTTP 가 함께 쓰는 JSON-RPC 요청 타입
+  gate/               개인 게이트(.claude/state/personal-gate) 감지
+```
+
+의존 방향은 `cli → mcp·a2a → dispatch → acp·codex·board·agents` 한 방향이다. 하위 패키지는 상위 패키지를 import 하지 않는다. 테스트는 패키지마다 따로 있고, 모의 ACP 서버가 필요한 패키지는 `TestMain` 에서 `acptest.Main(m)` 을 부른다.
+
+--- | :--- | :--- |
 | `main.go` | 249 | CLI 엔트리포인트, `-timeout`·`-cwd` 파싱 및 서브커맨드 라우팅 |
 | `board.go` | 268 | 공유 보드(`Board`) 자료구조, 에이전트 카드, 태스크·메시지 상태 갱신 |
 | `board_sessions.go` | 238 | 수신함 조회, 태스크 조회, 명명 세션(`NamedSession`) 생성·조회·종료 |
@@ -112,7 +129,7 @@ AI 코딩 에이전트 두 개(`agy`, `codex`)를 함께 쓸 때 프로세스를
 ```sh
 go vet ./...
 go test -race -v ./...
-go build -o ~/.local/bin/a2a-acp-bridge .
+go build -o ~/.local/bin/a2a-acp-bridge ./cmd/a2a-acp-bridge
 ```
 
 ### 4.2 로컬 MCP 등록
