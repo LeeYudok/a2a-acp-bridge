@@ -162,17 +162,19 @@ func runSendCmd(ctx context.Context, d *dispatch.Dispatcher, rest []string) erro
 func runInboxCmd(ctx context.Context, d *dispatch.Dispatcher, rest []string) error {
 	fs := flag.NewFlagSet("inbox", flag.ContinueOnError)
 	all := fs.Bool("all", false, "읽은 메시지 포함 조회")
+	peek := fs.Bool("peek", false, "읽음 표시 없이 조회(mark_read=false)")
 	if err := fs.Parse(rest); err != nil {
 		return err
 	}
 	if fs.NArg() < 1 {
-		return fmt.Errorf("inbox: 에이전트 ID(agy|codex|claude|user)가 필요합니다")
+		return fmt.Errorf("inbox: 에이전트 ID(agy|codex|claude|user 등)가 필요합니다")
 	}
 	cmdCtx, cancel := context.WithTimeout(ctx, defaultCommandTimeout)
 	defer cancel()
 	res, err := d.CallTool(cmdCtx, "a2a_receive_messages", map[string]any{
 		"agent_id":    fs.Arg(0),
 		"unread_only": !*all,
+		"mark_read":   !*peek,
 	})
 	return printResult(res, err)
 }

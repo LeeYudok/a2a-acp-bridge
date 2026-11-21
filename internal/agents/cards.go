@@ -22,11 +22,12 @@ type Card struct {
 
 // Discovery 는 a2a_discover_agents 도구와 /.well-known/agent.json 의 응답이다
 type Discovery struct {
-	Protocol    string               `json:"protocol"`
-	Workspace   string               `json:"workspace"`
-	Agents      []Card               `json:"agents"`
-	Sessions    []board.NamedSession `json:"sessions"`
-	RecentTasks []board.Task         `json:"recent_tasks"`
+	Protocol    string                  `json:"protocol"`
+	Workspace   string                  `json:"workspace"`
+	Agents      []Card                  `json:"agents"`
+	Sessions    []board.NamedSession    `json:"sessions"`
+	RecentTasks []board.Task            `json:"recent_tasks"`
+	Coordinator *board.CoordinatorLease `json:"coordinator,omitempty"`
 }
 
 // Discover 는 Agent Card 목록에 열린 명명 세션과 최근 태스크를 붙여 반환한다
@@ -46,9 +47,7 @@ func Discover(workspace string, sessions []board.NamedSession, recent []board.Ta
 	}
 }
 
-// Cards 는 브리지에 참여하는 에이전트(agy, codex, claude)의 Agent Card 를 반환한다.
-// 셋 모두 위임 대상이다(ask-agy·ask-codex·ask-claude).
-func Cards() []Card {
+func builtinCards() []Card {
 	return []Card{
 		{
 			ID:        "agy",

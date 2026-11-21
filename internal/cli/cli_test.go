@@ -62,3 +62,34 @@ func TestCLIFlagsTimeoutAndCwd(t *testing.T) {
 		t.Fatalf("runAgySessionsCmd 실패: %v", err)
 	}
 }
+
+func TestInboxPeekAndCoordCLI(t *testing.T) {
+	b := board.New(filepath.Join(t.TempDir(), "board.json"))
+	d := &dispatch.Dispatcher{Board: b, Caller: "agy", DefaultCwd: t.TempDir()}
+	ctx := context.Background()
+
+	if _, err := b.SendMessage("agy", "codex", "읽기 전용 테스트", "sync", ""); err != nil {
+		t.Fatalf("SendMessage 실패: %v", err)
+	}
+	if err := runInboxCmd(ctx, d, []string{"-peek", "codex"}); err != nil {
+		t.Fatalf("inbox -peek 실패: %v", err)
+	}
+	unread, err := b.ReceiveMessages("codex", true, false, 10)
+	if err != nil || len(unread) != 1 {
+		t.Fatalf("inbox -peek 후에도 미읽음 1건이 남아야 합니다: len=%d, err=%v", len(unread), err)
+	}
+
+	if err := runCoordCmd(ctx, d, []string{"claim", "-agent", "agy", "-expected-term", "0", "-ttl", "30m", "-reason", "초기"}); err != nil {
+		t.Fatalf("coord claim 실패: %v", err)
+	}
+	if err := runCoordCmd(ctx, d, []string{"renew", "-agent", "agy", "-ttl", "45m"}); err != nil {
+		t.Fatalf("coord renew 실패: %v", err)
+	}
+	if err := runCoordCmd(ctx, d, []string{"handoff", "-agent", "agy", "-to", "hermes", "-reason", "이양"}); err != nil {
+		t.Fatalf("coord handoff 실패: %v", err)
+	}
+	cur, err := b.GetCoordinator()
+	if err != nil || cur == nil || cur.Leader != "hermes" || cur.Term != 2 {
+		t.Fatalf("coord handoff 결과 불일치: cur=%+v, err=%v", cur, err)
+	}
+}
