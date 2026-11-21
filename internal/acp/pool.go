@@ -1,18 +1,25 @@
-package main
+package acp
 
 import (
-	"bufio"
 	"context"
+	"errors"
 	"fmt"
-	"io"
 	"os"
-	"os/exec"
 	"strings"
 	"sync"
-	"sync/atomic"
 )
 
-var defaultPool = NewSessionPool(nil)
+// ErrSessionNotFound 는 풀에 해당 세션의 살아있는 워커가 없을 때 반환한다
+var ErrSessionNotFound = errors.New("세션을 찾을 수 없음")
+
+// TurnResult 는 ACP 프롬프트 턴 하나의 결과다
+type TurnResult struct {
+	SessionID     string
+	Response      string
+	ToolCalls     []string
+	StopReason    string
+	ReusedProcess bool
+}
 
 // WorkerStatus 는 상주 ACP 워커 프로세스 상태 스냅샷이다
 type WorkerStatus struct {
@@ -26,49 +33,19 @@ type WorkerStatus struct {
 	TurnCount      int64  `json:"turn_count"`
 }
 
-// SessionControlResult 는 acp_session_control 도구의 응답 DTO다
-type SessionControlResult struct {
-	Action   string         `json:"action"`
-	Session  string         `json:"session,omitempty"`
-	Mode     string         `json:"mode,omitempty"`
-	Model    string         `json:"model,omitempty"`
-	Status   string         `json:"status"`
-	Workers  []WorkerStatus `json:"workers,omitempty"`
-	Sessions []NamedSession `json:"sessions,omitempty"`
-}
-
-type acpWorker struct {
-	turnMu         sync.Mutex
-	writeMu        sync.Mutex
-	metaMu         sync.RWMutex
-	cmd            *exec.Cmd
-	stdin          io.WriteCloser
-	reader         *bufio.Scanner
-	sessionID      string
-	cwd            string
-	mode           string
-	model          string
-	supportsResume bool
-	supportsClose  bool
-	nextReqID      atomic.Int64
-	turnCount      atomic.Int64
-	activePrompt   atomic.Bool
-	cancelling     atomic.Bool
-	exited         atomic.Bool
-}
-
 // SessionPool 은 acpx 스타일의 상주 ACP 세션 프로세스 풀이다
 type SessionPool struct {
 	mu      sync.Mutex
 	command []string
-	workers map[string]*acpWorker
+	workers map[string]*worker
 }
 
-// NewSessionPool 은 지정한 ACP 실행 명령으로 SessionPool 을 생성한다
+// NewSessionPool 은 지정한 ACP 실행 명령으로 SessionPool 을 만든다.
+// command 가 비어 있으면 A2A_ACP_COMMAND, 그다음 `agy acp --dangerously-skip-permissions` 를 쓴다.
 func NewSessionPool(command []string) *SessionPool {
 	return &SessionPool{
 		command: command,
-		workers: make(map[string]*acpWorker),
+		workers: make(map[string]*worker),
 	}
 }
 
@@ -85,15 +62,16 @@ func (p *SessionPool) resolveCommand() []string {
 }
 
 // Prompt 는 상주 워커를 재사용하거나 새로 띄워 ACP 프롬프트 턴을 실행한다
-func (p *SessionPool) Prompt(ctx context.Context, cwd, promptText, sessionID string) (AgyDelegateResult, error) {
+func (p *SessionPool) Prompt(ctx context.Context, cwd, promptText, sessionID string) (TurnResult, error) {
 	return p.PromptWithOptions(ctx, cwd, promptText, sessionID, "", "")
 }
 
-// PromptWithOptions 는 필요 시 모드·모델을 선적용한 뒤 상주 워커에서 프롬프트 턴을 실행한다
-func (p *SessionPool) PromptWithOptions(ctx context.Context, cwd, promptText, sessionID, mode, model string) (AgyDelegateResult, error) {
+// PromptWithOptions 는 필요 시 모드·모델을 선적용한 뒤 상주 워커에서 프롬프트 턴을 실행한다.
+// 재사용한 워커가 실패하면 한 번 새 워커로 다시 시도한다.
+func (p *SessionPool) PromptWithOptions(ctx context.Context, cwd, promptText, sessionID, mode, model string) (TurnResult, error) {
 	w, reused, err := p.acquireWorker(cwd, sessionID)
 	if err != nil {
-		return AgyDelegateResult{}, err
+		return TurnResult{}, err
 	}
 	res, err := w.runPromptTurn(ctx, promptText, reused, mode, model)
 	if err == nil {
@@ -101,16 +79,16 @@ func (p *SessionPool) PromptWithOptions(ctx context.Context, cwd, promptText, se
 	}
 	p.evictWorker(w.sessionID, w)
 	if !reused {
-		return AgyDelegateResult{}, err
+		return TurnResult{}, err
 	}
 	w2, _, err2 := p.acquireWorker(cwd, w.sessionID)
 	if err2 != nil {
-		return AgyDelegateResult{}, err
+		return TurnResult{}, err
 	}
 	return w2.runPromptTurn(ctx, promptText, false, mode, model)
 }
 
-func (p *SessionPool) acquireWorker(cwd, sessionID string) (*acpWorker, bool, error) {
+func (p *SessionPool) acquireWorker(cwd, sessionID string) (*worker, bool, error) {
 	p.mu.Lock()
 	if sessionID != "" {
 		if existing, ok := p.workers[sessionID]; ok && existing.isAlive() {
@@ -120,7 +98,7 @@ func (p *SessionPool) acquireWorker(cwd, sessionID string) (*acpWorker, bool, er
 	}
 	p.mu.Unlock()
 
-	created, err := spawnACPWorker(p.resolveCommand(), cwd, sessionID)
+	created, err := spawnWorker(p.resolveCommand(), cwd, sessionID)
 	if err != nil {
 		return nil, false, err
 	}
@@ -134,7 +112,7 @@ func (p *SessionPool) acquireWorker(cwd, sessionID string) (*acpWorker, bool, er
 	return created, false, nil
 }
 
-func (p *SessionPool) evictWorker(sessionID string, target *acpWorker) {
+func (p *SessionPool) evictWorker(sessionID string, target *worker) {
 	p.mu.Lock()
 	if cur, ok := p.workers[sessionID]; ok && (target == nil || cur == target) {
 		delete(p.workers, sessionID)
@@ -145,7 +123,7 @@ func (p *SessionPool) evictWorker(sessionID string, target *acpWorker) {
 	p.mu.Unlock()
 }
 
-// Cancel 은 실행 중인 ACP 세션에 비선점 session/cancel 알림을 전송한다
+// Cancel 은 실행 중인 ACP 세션에 비선점 session/cancel 알림을 보낸다
 func (p *SessionPool) Cancel(sessionID string) error {
 	p.mu.Lock()
 	w, ok := p.workers[sessionID]
@@ -156,7 +134,7 @@ func (p *SessionPool) Cancel(sessionID string) error {
 	return w.sendCancel()
 }
 
-// SetMode 는 상주 또는 재연결된 ACP 세션의 실행 모드(auto|accept-edits|plan)를 변경한다
+// SetMode 는 상주 또는 재연결한 ACP 세션의 실행 모드(auto|accept-edits|plan)를 바꾼다
 func (p *SessionPool) SetMode(cwd, sessionID, modeID string) error {
 	w, _, err := p.acquireWorker(cwd, sessionID)
 	if err != nil {
@@ -167,7 +145,7 @@ func (p *SessionPool) SetMode(cwd, sessionID, modeID string) error {
 	return w.applyModeLocked(modeID)
 }
 
-// SetModel 은 ACP 세션의 모델 설정(session/set_config_option 또는 session/set_model)을 변경한다
+// SetModel 은 ACP 세션의 모델(session/set_config_option 또는 session/set_model)을 바꾼다
 func (p *SessionPool) SetModel(cwd, sessionID, modelID string) error {
 	w, _, err := p.acquireWorker(cwd, sessionID)
 	if err != nil {
@@ -196,7 +174,7 @@ func (p *SessionPool) CloseSession(sessionID string) error {
 // CloseAll 은 풀의 모든 상주 ACP 워커 프로세스를 정리한다
 func (p *SessionPool) CloseAll() {
 	p.mu.Lock()
-	all := make([]*acpWorker, 0, len(p.workers))
+	all := make([]*worker, 0, len(p.workers))
 	for id, w := range p.workers {
 		delete(p.workers, id)
 		all = append(all, w)
@@ -232,63 +210,4 @@ func (p *SessionPool) Snapshots() []WorkerStatus {
 		})
 	}
 	return out
-}
-
-func (w *acpWorker) getMode() string {
-	w.metaMu.RLock()
-	defer w.metaMu.RUnlock()
-	return w.mode
-}
-
-func (w *acpWorker) setModeValue(modeID string) {
-	w.metaMu.Lock()
-	w.mode = modeID
-	w.metaMu.Unlock()
-}
-
-func (w *acpWorker) getModel() string {
-	w.metaMu.RLock()
-	defer w.metaMu.RUnlock()
-	return w.model
-}
-
-func (w *acpWorker) setModelValue(modelID string) {
-	w.metaMu.Lock()
-	w.model = modelID
-	w.metaMu.Unlock()
-}
-
-func (w *acpWorker) isAlive() bool {
-	return w != nil && !w.exited.Load()
-}
-
-func (w *acpWorker) sendCancel() error {
-	w.cancelling.Store(true)
-	w.writeMu.Lock()
-	defer w.writeMu.Unlock()
-	return writeJSONRPC(w.stdin, map[string]any{
-		"jsonrpc": "2.0",
-		"method":  "session/cancel",
-		"params":  map[string]any{"sessionId": w.sessionID},
-	})
-}
-
-func (w *acpWorker) gracefulClose() {
-	if w.supportsClose && w.isAlive() {
-		w.turnMu.Lock()
-		reqID := int(w.nextReqID.Add(1))
-		_, _, _, _ = w.sendRPC(reqID, "session/close", map[string]any{"sessionId": w.sessionID}, true)
-		w.turnMu.Unlock()
-	}
-	w.killProcess()
-}
-
-func (w *acpWorker) killProcess() {
-	w.exited.Store(true)
-	if w.stdin != nil {
-		_ = w.stdin.Close()
-	}
-	if w.cmd != nil && w.cmd.Process != nil {
-		_ = w.cmd.Process.Kill()
-	}
 }

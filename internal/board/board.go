@@ -1,4 +1,6 @@
-package main
+// Package board 는 에이전트가 함께 쓰는 파일 기반 A2A 보드(태스크·메시지·명명 세션)다.
+// 프로세스 내부 뮤텍스와 OS 파일 락을 함께 잡고, 임시 파일 교체로 원자 저장한다.
+package board
 
 import (
 	"errors"
@@ -13,32 +15,6 @@ var ErrTaskNotFound = errors.New("태스크를 찾을 수 없음")
 
 // ErrSessionNotFound 는 요청한 세션 이름 또는 ID가 없을 때 반환한다
 var ErrSessionNotFound = errors.New("세션을 찾을 수 없음")
-
-// Skill 은 A2A Agent Card 의 개별 역량 항목이다
-type Skill struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-}
-
-// AgentCard 는 A2A 표준 에이전트 메타데이터다
-type AgentCard struct {
-	ID           string          `json:"id"`
-	Name         string          `json:"name"`
-	Version      string          `json:"version"`
-	Protocols    []string        `json:"protocols"`
-	Endpoint     string          `json:"endpoint"`
-	Capabilities map[string]bool `json:"capabilities"`
-	Skills       []Skill         `json:"skills"`
-}
-
-// DiscoverResponse 는 a2a_discover_agents 도구 및 /.well-known/agent.json 응답 DTO다
-type DiscoverResponse struct {
-	Protocol    string         `json:"protocol"`
-	Workspace   string         `json:"workspace"`
-	Agents      []AgentCard    `json:"agents"`
-	Sessions    []NamedSession `json:"sessions"`
-	RecentTasks []Task         `json:"recent_tasks"`
-}
 
 // Artifact 는 태스크 산출물 메타데이터다
 type Artifact struct {
@@ -97,8 +73,8 @@ type Board struct {
 	path string
 }
 
-// DefaultBoardPath 는 기본 보드 저장 경로를 반환한다
-func DefaultBoardPath() (string, error) {
+// DefaultPath 는 기본 보드 저장 경로를 반환한다. A2A_BRIDGE_STORE 가 있으면 그 값을 쓴다
+func DefaultPath() (string, error) {
 	if env := os.Getenv("A2A_BRIDGE_STORE"); env != "" {
 		return env, nil
 	}
@@ -113,68 +89,9 @@ func DefaultBoardPath() (string, error) {
 	return filepath.Join(dir, "a2a_board.json"), nil
 }
 
-// NewBoard 는 주어진 파일 경로를 사용하는 Board 를 생성한다
-func NewBoard(path string) *Board {
+// New 는 주어진 파일 경로를 쓰는 Board 를 만든다
+func New(path string) *Board {
 	return &Board{path: path}
-}
-
-// AgentCards 는 AGY와 Codex의 A2A Agent Card 목록을 반환한다
-func AgentCards(workspace string, sessions []NamedSession, recent []Task) DiscoverResponse {
-	if sessions == nil {
-		sessions = []NamedSession{}
-	}
-	if recent == nil {
-		recent = []Task{}
-	}
-	return DiscoverResponse{
-		Protocol:  "A2A/1.0 + ACP/1.0",
-		Workspace: workspace,
-		Agents: []AgentCard{
-			{
-				ID:        "agy",
-				Name:      "Google Antigravity (AGY)",
-				Version:   "1.5.9",
-				Protocols: []string{"ACP-stdio-jsonrpc-2.0", "A2A-1.0", "MCP"},
-				Endpoint:  "agy acp",
-				Capabilities: map[string]bool{
-					"streaming":          true,
-					"session_resume":     true,
-					"session_pool":       true,
-					"cooperative_cancel": true,
-					"runtime_mode_model": true,
-					"async_queue":        true,
-					"embedded_context":   true,
-					"multi_turn":         true,
-				},
-				Skills: []Skill{
-					{ID: "code-generation", Name: "코드 작성 및 리팩터링"},
-					{ID: "architecture-review", Name: "설계 및 아키텍처 검증"},
-					{ID: "acp-session", Name: "ACP 상주 세션·취소·모드 제어"},
-				},
-			},
-			{
-				ID:        "codex",
-				Name:      "OpenAI Codex CLI",
-				Version:   "0.169.0",
-				Protocols: []string{"Codex-JSONL-exec", "Codex-app-server", "A2A-1.0", "MCP"},
-				Endpoint:  "codex exec --json",
-				Capabilities: map[string]bool{
-					"streaming":      true,
-					"session_resume": true,
-					"async_queue":    true,
-					"code_review":    true,
-					"multi_turn":     true,
-				},
-				Skills: []Skill{
-					{ID: "code-review", Name: "교차 코드 리뷰 및 버그 탐지"},
-					{ID: "task-execution", Name: "비대화형 작업 수행 및 검증"},
-					{ID: "thread-resume", Name: "스레드 기반 다중 턴 협업"},
-				},
-			},
-		},
-		Sessions:    sessions,
-		RecentTasks: recent,
-	}
 }
 
 func upsertTaskInState(st *boardState, creator, assignee, title, state, taskID, sessionRef string, now float64) (Task, error) {

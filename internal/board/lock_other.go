@@ -1,6 +1,6 @@
 //go:build !(darwin || linux || freebsd || netbsd || openbsd || dragonfly)
 
-package main
+package board
 
 func lockBoardFile(_ string) (func(), error) {
 	return func() {}, nil

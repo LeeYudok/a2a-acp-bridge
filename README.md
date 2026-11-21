@@ -6,7 +6,7 @@
 
 ```sh
 # 1. 빌드 및 설치
-go build -o ~/.local/bin/a2a-acp-bridge .
+go build -o ~/.local/bin/a2a-acp-bridge ./cmd/a2a-acp-bridge
 
 # 2. AGY 및 Codex에 MCP 서버 등록
 agy mcp add a2a-acp-bridge -- ~/.local/bin/a2a-acp-bridge mcp
@@ -81,27 +81,27 @@ AI 코딩 에이전트 두 개(`agy`, `codex`)를 함께 쓸 때 프로세스를
 
 ---
 
-## 3. 소스 파일 구조
+## 3. 소스 구조
 
-모든 파일은 단일 책임 원칙에 따라 300줄 이하로 유지한다. 함수당 인지 복잡도(CC)도 15 이하로 구성했다(2026-11-22 기준 총 2,936줄).
+`cmd/` 에는 진입점만 두고, 기능은 `internal/` 패키지로 나눈다. 패키지 하나가 책임 하나를 맡고, 파일은 300줄 이하로 유지한다.
 
-| 파일 | 줄 수 | 역할 |
-| :--- | :--- | :--- |
-| `main.go` | 249 | CLI 엔트리포인트, `-timeout`·`-cwd` 파싱 및 서브커맨드 라우팅 |
-| `board.go` | 268 | 공유 보드(`Board`) 자료구조, 에이전트 카드, 태스크·메시지 상태 갱신 |
-| `board_sessions.go` | 238 | 수신함 조회, 태스크 조회, 명명 세션(`NamedSession`) 생성·조회·종료 |
-| `board_store.go` | 95 | 파일 락 래퍼(`withLock`), 고유 임시파일(`os.CreateTemp`) 기반 원자적 저장 |
-| `board_lock_unix.go` | 35 | Unix `flock` 기반 보드 다중 프로세스 배타 락 |
-| `board_lock_other.go` | 7 | 비유닉스 환경 보드 파일 락 폴백 |
-| `agy_history.go` | 64 | `agy-sessions` 서브커맨드 및 `session/list` 페이지 조회 |
-| `clients.go` | 269 | ACP 스트림 파서, 역방향 권한 요청 자동 응답기, Codex JSONL 실행기 |
-| `pool.go` | 294 | 상주 ACP 워커 풀(`SessionPool`), `PromptWithOptions`, 턴 취소·모드·모델 제어 |
-| `pool_worker.go` | 295 | 개별 `acpWorker` 스폰, `session/set_mode`·`session/set_model` 선적용, 프롬프트 턴 실행 |
-| `server.go` | 249 | MCP 도구 스키마 정의(`MCPTools`), `Dispatcher` 라우팅, 비동기 큐(`asyncWG`) |
-| `server_transport.go` | 274 | Codex 위임 실행, `acp_session_control` 처리, MCP stdio JSON-RPC 서버 루프 |
-| `server_http.go` | 71 | Go 1.22+ `http.ServeMux` 기반 A2A HTTP 서버 (`/.well-known/agent.json`, `/a2a`) |
-| `bridge_test.go` | 282 | 모의 ACP 서버 기반 세션 풀 재사용·리플레이 억제·비동기 큐·MCP·HTTP 통합 테스트 |
-| `bridge_improvements_test.go` | 246 | 다중 고루틴·멀티프로세스 보드 락, 모드·모델 선적용, CLI 플래그·`sync` intent 테스트 |
+```
+cmd/a2a-acp-bridge/   main — cli.Run 호출만
+internal/
+  cli/                서브커맨드·플래그(-timeout, -cwd) 해석
+  dispatch/           도구 스키마(Tools)와 도구 이름 → acp·codex·board 라우팅, 비동기 큐
+  acp/                ACP 프로토콜 파서, 상주 워커, 세션 풀, session/list
+  acp/acptest/        테스트용 모의 ACP 에이전트(테스트 바이너리를 자식 프로세스로 재실행)
+  codex/              codex exec/resume JSONL 러너
+  board/              공유 보드: 태스크·메시지·명명 세션, flock + 임시 파일 원자 저장
+  agents/             A2A Agent Card
+  mcp/                MCP stdio JSON-RPC 서버
+  a2a/                A2A HTTP 서버(/.well-known/agent.json, /a2a)
+  jsonrpc/            MCP·A2A HTTP 가 함께 쓰는 JSON-RPC 요청 타입
+  gate/               개인 게이트(.claude/state/personal-gate) 감지
+```
+
+의존 방향은 `cli → mcp·a2a → dispatch → acp·codex·board·agents` 한 방향이다. 하위 패키지는 상위 패키지를 import 하지 않는다. 테스트는 패키지마다 따로 있고, 모의 ACP 서버가 필요한 패키지는 `TestMain` 에서 `acptest.Main(m)` 을 부른다.
 
 ---
 
@@ -112,7 +112,7 @@ AI 코딩 에이전트 두 개(`agy`, `codex`)를 함께 쓸 때 프로세스를
 ```sh
 go vet ./...
 go test -race -v ./...
-go build -o ~/.local/bin/a2a-acp-bridge .
+go build -o ~/.local/bin/a2a-acp-bridge ./cmd/a2a-acp-bridge
 ```
 
 ### 4.2 로컬 MCP 등록
@@ -150,11 +150,11 @@ MCP 서버(`a2a-acp-bridge mcp`)는 아래 7개 도구를 노출한다(2026-11-2
 | 도구 이름 | 언제 쓰나 | 필수 인자 | 선택 인자 |
 | :--- | :--- | :--- | :--- |
 | `a2a_discover_agents` | 사용 가능한 에이전트 카드, 열린 명명 세션, 최근 태스크 10건을 확인할 때 | 없음 | 없음 |
-| `acp_delegate_to_agy` | AGY(`agy acp`)에게 코드 작성·분석·리팩터링을 맡길 때 | `prompt` | `session_name`, `session_id`, `mode`, `model`, `async`, `cwd` |
-| `a2a_delegate_to_codex` | Codex(`codex exec`)에게 교차 코드 리뷰나 비대화형 작업을 맡길 때 | `prompt` | `session_name`, `thread_id`, `sandbox`, `async`, `cwd` |
+| `acp_delegate_to_agy` | AGY(`agy acp`)에게 코드 작성·분석·리팩터링을 맡길 때 | `prompt` | `session_name`, `session_id`, `mode`, `model`, `async`, `cwd`, `from_agent` |
+| `a2a_delegate_to_codex` | Codex(`codex exec`)에게 교차 코드 리뷰나 비대화형 작업을 맡길 때 | `prompt` | `session_name`, `thread_id`, `sandbox`, `async`, `cwd`, `from_agent` |
 | `acp_session_control` | 상주 세션 상태를 보거나 실행 중 취소·모드 변경·모델 변경·종료할 때 | `action` | `session`, `mode`, `model`, `cwd` |
 | `a2a_send_message` | 에이전트 직접 실행 없이 공유 보드에 메시지·태스크만 남길 때 (`intent`: `delegate`/`review`/`reply`/`chat`/`sync`) | `from_agent`, `to_agent`, `content` | `intent`, `task_id` |
-| `a2a_receive_messages` | 특정 에이전트(`agy` 또는 `codex`) 앞으로 온 메시지를 읽을 때 | `agent_id` | `unread_only`, `mark_read` |
+| `a2a_receive_messages` | 특정 에이전트(`agy`·`codex`·`claude`) 앞으로 온 메시지를 읽을 때 | `agent_id` | `unread_only`, `mark_read` |
 | `a2a_task_status` | 특정 `task_id`의 진행 상태와 대화 내역을 조회하거나 상태를 바꿀 때 | 없음 | `task_id`, `state` |
 
 ### 5.1 `acp_delegate_to_agy` 호출 및 응답 예
@@ -274,5 +274,6 @@ curl -s http://127.0.0.1:8765/a2a \
 | `A2A_BRIDGE_STORE` | `~/.local/share/a2a-acp-bridge/a2a_board.json` | 태스크·메시지·명명 세션을 저장하는 JSON 파일 경로 |
 | `A2A_ACP_COMMAND` | `agy acp --dangerously-skip-permissions` | ACP 워커가 실행할 명령어와 인자 재정의 |
 | `A2A_CODEX_COMMAND` | `codex` | Codex 위임 시 실행할 바이너리 명령 재정의 |
+| `A2A_AGENT_ID` | (없음) | CLI 를 부르는 에이전트 ID(`agy`·`codex`·`claude`). 위임·`send` 에 `-from` 이 없으면 이 값을 발신자로 기록하고, 이것도 없으면 `user` 로 기록한다. MCP 서버는 initialize 의 `clientInfo.name` 으로 발신자를 추정한다 |
 
 보드 저장소(`a2a_board.json`)는 프로세스 내부 뮤텍스와 Unix OS 파일 락(`a2a_board.json.lock`, `flock`)으로 다중 프로세스 동시 쓰기를 직렬화한다. 같은 디렉터리에 `os.CreateTemp`로 고유 임시 파일을 만들고 권한 `0600`으로 쓴 뒤 `os.Rename`으로 원자적 교체한다.
