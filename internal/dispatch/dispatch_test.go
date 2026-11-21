@@ -161,6 +161,33 @@ func TestACPDelegateAppliesModeAndModelBeforePrompt(t *testing.T) {
 	}
 }
 
+func toolProps(t *testing.T, name string) (map[string]any, []string) {
+	t.Helper()
+	for _, tool := range Tools() {
+		if tool.Name == name {
+			props, _ := tool.InputSchema["properties"].(map[string]any)
+			required, _ := tool.InputSchema["required"].([]string)
+			return props, required
+		}
+	}
+	t.Fatalf("%s 도구가 없습니다", name)
+	return nil, nil
+}
+
+// 발신자를 생략하면 user 로 기록되고 응답도 user 수신함에 쌓이므로, MCP 스키마로도 그 수신함을 읽고
+// from_agent 없이 보낼 수 있어야 한다(PR #10 Codex 리뷰 P2·P3).
+func TestToolsAllowDefaultSender(t *testing.T) {
+	props, _ := toolProps(t, "a2a_receive_messages")
+	agentID, _ := props["agent_id"].(map[string]any)
+	if enums, _ := agentID["enum"].([]string); !slices.Contains(enums, "user") || !slices.Contains(enums, "claude") {
+		t.Fatalf("a2a_receive_messages agent_id enum = %v, user·claude 가 있어야 함", enums)
+	}
+	_, required := toolProps(t, "a2a_send_message")
+	if slices.Contains(required, "from_agent") {
+		t.Fatalf("a2a_send_message required = %v, from_agent 는 선택이어야 함", required)
+	}
+}
+
 func TestToolsIncludeSyncIntent(t *testing.T) {
 	for _, tool := range Tools() {
 		if tool.Name != "a2a_send_message" {

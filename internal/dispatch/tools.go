@@ -86,18 +86,18 @@ func Tools() []ToolSchema {
 			Name:        "a2a_send_message",
 			Description: "공유 A2A 메시지 보드에 다른 에이전트(agy, codex, claude) 앞으로 메시지/태스크를 남깁니다.",
 			InputSchema: objectSchema(map[string]any{
-				"from_agent": enumProp(agents.Senders()),
+				"from_agent": fromProp(),
 				"to_agent":   enumProp(agents.IDs()),
 				"content":    strProp("전달할 메시지 본문"),
 				"intent":     enumProp(intentEnum),
 				"task_id":    strProp("연결할 태스크 ID (선택)"),
-			}, "from_agent", "to_agent", "content"),
+			}, "to_agent", "content"),
 		},
 		{
 			Name:        "a2a_receive_messages",
 			Description: "공유 A2A 메시지 보드에서 특정 에이전트(agy, codex, claude) 앞으로 도착한 메시지를 읽습니다.",
 			InputSchema: objectSchema(map[string]any{
-				"agent_id":    enumProp(agents.IDs()),
+				"agent_id":    enumProp(agents.Senders()),
 				"unread_only": map[string]any{"type": "boolean"},
 				"mark_read":   map[string]any{"type": "boolean"},
 			}, "agent_id"),

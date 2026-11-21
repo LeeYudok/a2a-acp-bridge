@@ -164,7 +164,7 @@ func runInboxCmd(ctx context.Context, d *dispatch.Dispatcher, rest []string) err
 		return err
 	}
 	if fs.NArg() < 1 {
-		return fmt.Errorf("inbox: 에이전트 ID(agy|codex|claude)가 필요합니다")
+		return fmt.Errorf("inbox: 에이전트 ID(agy|codex|claude|user)가 필요합니다")
 	}
 	cmdCtx, cancel := context.WithTimeout(ctx, defaultCommandTimeout)
 	defer cancel()
