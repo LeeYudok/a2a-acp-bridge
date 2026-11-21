@@ -113,7 +113,7 @@ func TestRunKeepsParentCodexHomeWithoutTarget(t *testing.T) {
 	}
 }
 
-func TestResumeLeavesSandboxToThread(t *testing.T) {
+func TestResumeUsesSafeReadOnlyDefault(t *testing.T) {
 	if _, err := os.Stat("/bin/sh"); err != nil {
 		t.Skip("sh is unavailable")
 	}
@@ -129,8 +129,8 @@ func TestResumeLeavesSandboxToThread(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runOnce 실패: %v", err)
 	}
-	if len(msgs) != 1 || !strings.HasPrefix(msgs[0], "exec resume ") || strings.Contains(msgs[0], " -s ") || !strings.Contains(msgs[0], "thread-1") {
-		t.Fatalf("재개 인자 = %q, 원하는 값 exec resume ... thread-1", msgs)
+	if len(msgs) != 1 || !strings.HasPrefix(msgs[0], "-s read-only exec resume ") || !strings.Contains(msgs[0], "thread-1") {
+		t.Fatalf("재개 인자 = %q, 원하는 값 -s read-only exec resume ... thread-1", msgs)
 	}
 }
 

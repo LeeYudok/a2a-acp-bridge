@@ -96,7 +96,7 @@ AI 코딩 에이전트 셋(`agy`, `codex`, `claude`)을 함께 쓸 때 프로세
 
 **Codex**
 - 새 실행은 `codex -s <sandbox> exec --skip-git-repo-check --json <prompt>`다. `sandbox`는 `read-only` 또는 `workspace-write`이고 새 실행의 기본값은 `workspace-write`다.
-- 스레드를 이어갈 때는 기본적으로 `codex exec resume --skip-git-repo-check --json <thread_id> <prompt>`를 써서 기존 스레드의 샌드박스·승인 설정을 따른다. 호출자가 `sandbox`를 명시하면 `codex -s <sandbox> exec resume ...`로 해당 실행의 제한을 적용한다.
+- 스레드를 이어갈 때는 `codex -s <sandbox> exec resume --skip-git-repo-check --json <thread_id> <prompt>`를 쓴다. Codex 0.170.0의 재개는 기존 스레드 권한을 복원하지 않고 현재 설정을 다시 적용하므로, 브리지는 재개 시 `sandbox`를 생략하면 `read-only`를 적용한다. 쓰기 권한이 필요하면 `workspace-write`를 명시한다.
 - 호출자와 대상 Codex의 `CODEX_HOME`이 다르면 `A2A_CODEX_HOME`으로 대상 홈을 지정한다. 브리지는 자식 Codex에만 이 값을 적용하고 `CODEX_SESSION_ID`·`CODEX_THREAD_ID`·`CODEX_TOOL_CALL_ID`는 상속하지 않는다.
 - stdout의 JSONL에서 `thread.started`의 `thread_id`와 `item.completed` 중 `agent_message`의 텍스트를 모은다. 마지막 메시지가 `response`이고 전부가 `all_messages`다. JSONL 한 줄은 최대 4 MiB까지 읽는다.
 - stderr는 본문 파싱에 섞지 않고 오류 진단에만 덧붙인다. 실행 실패, 타임아웃, 취소는 stderr와 함께 오류로 전달되고 태스크는 `failed`가 된다.
@@ -367,7 +367,7 @@ a2a-acp-bridge serve-a2a -addr 127.0.0.1:8765
 | 서브커맨드 | 플래그 |
 | :--- | :--- |
 | `ask-agy` | `-s`, `-session-id`, `-mode`(`auto`·`accept-edits`·`plan`), `-model`, `-no-wait`, `-cwd`, `-timeout`, `-from` |
-| `ask-codex` | `-s`, `-thread-id`, `-sandbox`(`read-only`·`workspace-write`, 새 실행 기본 `workspace-write`, 재개 생략 시 기존 설정), `-no-wait`, `-cwd`, `-timeout`, `-from` |
+| `ask-codex` | `-s`, `-thread-id`, `-sandbox`(`read-only`·`workspace-write`, 새 실행 기본 `workspace-write`, 재개 기본 `read-only`), `-no-wait`, `-cwd`, `-timeout`, `-from` |
 | `ask-claude` | `-s`, `-session-id`, `-permission-mode`(`plan`·`default`·`acceptEdits`, 기본 `plan`), `-no-wait`, `-cwd`, `-timeout`, `-from` |
 | `agy-sessions` | `-cursor`, `-cwd`, `-timeout` |
 | `sessions`·`cancel`·`set-mode`·`set-model`·`close` | `-s`(또는 첫 위치 인자), `-mode`, `-model`, `-cwd`, `-timeout` |
