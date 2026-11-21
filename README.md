@@ -96,7 +96,7 @@ AI 코딩 에이전트 셋(`agy`, `codex`, `claude`)을 함께 쓸 때 프로세
 
 **Codex**
 - 새 실행은 `codex -s <sandbox> exec --skip-git-repo-check --json <prompt>`다. `sandbox`는 `read-only` 또는 `workspace-write`이고 기본값은 `workspace-write`다.
-- 스레드를 이어갈 때는 `codex -s <sandbox> exec resume --skip-git-repo-check --json <thread_id> <prompt>`를 쓴다.
+- 스레드를 이어갈 때는 `codex exec resume --skip-git-repo-check --json <thread_id> <prompt>`를 쓴다. 재개 호출은 기존 스레드의 샌드박스·승인 설정을 따르므로 `sandbox` 인자를 적용하지 않는다.
 - 호출자와 대상 Codex의 `CODEX_HOME`이 다르면 `A2A_CODEX_HOME`으로 대상 홈을 지정한다. 브리지는 자식 Codex에만 이 값을 적용하고 `CODEX_SESSION_ID`·`CODEX_THREAD_ID`·`CODEX_TOOL_CALL_ID`는 상속하지 않는다.
 - stdout의 JSONL에서 `thread.started`의 `thread_id`와 `item.completed` 중 `agent_message`의 텍스트를 모은다. 마지막 메시지가 `response`이고 전부가 `all_messages`다. JSONL 한 줄은 최대 4 MiB까지 읽는다.
 - stderr는 본문 파싱에 섞지 않고 오류 진단에만 덧붙인다. 실행 실패, 타임아웃, 취소는 stderr와 함께 오류로 전달되고 태스크는 `failed`가 된다.
@@ -325,8 +325,9 @@ a2a-acp-bridge ask-agy -s backend -no-wait "전체 패키지 정적 분석 실�
 # 4. Codex에게 읽기 전용(read-only) 코드 리뷰 위임
 a2a-acp-bridge ask-codex -s review -sandbox read-only -cwd /path/to/repo -timeout 5m "최근 커밋의 에러 래핑 누락 여부 확인해줘"
 
-# 4-1. 다른 CODEX_HOME의 Codex 스레드에 위임
-A2A_CODEX_HOME=/Users/me/.codex A2A_AGENT_ID=codex a2a-acp-bridge ask-codex -thread-id <thread-id> -sandbox read-only -cwd /path/to/repo -timeout 5m "현재 작업 상태를 알려줘"
+# 4-1. 다른 CODEX_HOME의 Codex 스레드에 위임 (재개는 기존 스레드 샌드박스 설정을 따름)
+THREAD_ID=01234567-89ab-cdef-0123-456789abcdef
+A2A_CODEX_HOME=/Users/me/.codex A2A_AGENT_ID=codex a2a-acp-bridge ask-codex -thread-id "$THREAD_ID" -cwd /path/to/repo -timeout 5m "현재 작업 상태를 알려줘"
 
 # 5. Claude Code에게 읽기 전용 리뷰 위임 (기본 plan), 같은 -s 이름으로 이어가기
 a2a-acp-bridge ask-claude -s review -cwd /path/to/repo -timeout 5m "internal/board 락 순서를 검토해줘"

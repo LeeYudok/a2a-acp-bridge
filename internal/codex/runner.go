@@ -101,7 +101,7 @@ func runOnce(ctx context.Context, cwd, sandbox, promptText, threadID string) (st
 	}
 	args := []string{"-s", sandbox, "exec", "--skip-git-repo-check", "--json", promptText}
 	if threadID != "" {
-		args = []string{"-s", sandbox, "exec", "resume", "--skip-git-repo-check", "--json", threadID, promptText}
+		args = []string{"exec", "resume", "--skip-git-repo-check", "--json", threadID, promptText}
 	}
 	cmdName := "codex"
 	if parts := strings.Fields(os.Getenv("A2A_CODEX_COMMAND")); len(parts) > 0 {

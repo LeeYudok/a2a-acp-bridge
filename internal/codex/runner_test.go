@@ -53,7 +53,7 @@ func TestRunUsesTargetCodexHome(t *testing.T) {
 		"thread='<unset>'; [ \"${CODEX_THREAD_ID+x}\" = x ] && thread=\"$CODEX_THREAD_ID\"\n" +
 		"tool='<unset>'; [ \"${CODEX_TOOL_CALL_ID+x}\" = x ] && tool=\"$CODEX_TOOL_CALL_ID\"\n" +
 		`printf '%s\n' '{"type":"thread.started","thread_id":"th-home"}'` + "\n" +
-		`printf '{"type":"item.completed","item":{"type":"agent_message","text":"home=%s;session=%s;thread=%s;tool=%s;pwd=%s;cwd=%s"}}\n' "$CODEX_HOME" "$session" "$thread" "$tool" "$PWD" "$(/bin/pwd -P)"` + "\n"
+		`printf '{"type":"item.completed","item":{"type":"agent_message","text":"home=%s;session=%s;thread=%s;tool=%s"}}\n' "$CODEX_HOME" "$session" "$thread" "$tool"` + "\n"
 	if err := os.WriteFile(script, []byte(body), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -71,16 +71,20 @@ func TestRunUsesTargetCodexHome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run 실패: %v", err)
 	}
-	physicalWorkDir, err := filepath.EvalSymlinks(workDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := "home=" + targetHome + ";session=<unset>;thread=<unset>;tool=<unset>;pwd=" + workDir + ";cwd=" + physicalWorkDir
+	want := "home=" + targetHome + ";session=<unset>;thread=<unset>;tool=<unset>"
 	if res.Response != want {
 		t.Fatalf("자식 환경 = %q, 원하는 값 %q", res.Response, want)
 	}
 	if got := os.Getenv("CODEX_HOME"); got != parentHome {
 		t.Fatalf("부모 CODEX_HOME = %q, 원하는 값 %q", got, parentHome)
+	}
+}
+
+func TestChildEnvSetsPWD(t *testing.T) {
+	workDir := t.TempDir()
+	env := childEnv(workDir)
+	if got := envValue(env, "PWD"); got != workDir {
+		t.Fatalf("PWD = %q, 원하는 값 %q", got, workDir)
 	}
 }
 
@@ -109,7 +113,7 @@ func TestRunKeepsParentCodexHomeWithoutTarget(t *testing.T) {
 	}
 }
 
-func TestResumePassesSandbox(t *testing.T) {
+func TestResumeLeavesSandboxToThread(t *testing.T) {
 	if _, err := os.Stat("/bin/sh"); err != nil {
 		t.Skip("sh is unavailable")
 	}
@@ -125,9 +129,19 @@ func TestResumePassesSandbox(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runOnce 실패: %v", err)
 	}
-	if len(msgs) != 1 || !strings.HasPrefix(msgs[0], "-s read-only exec resume ") || !strings.Contains(msgs[0], "thread-1") {
-		t.Fatalf("재개 인자 = %q, 원하는 값 -s read-only exec resume ... thread-1", msgs)
+	if len(msgs) != 1 || !strings.HasPrefix(msgs[0], "exec resume ") || strings.Contains(msgs[0], " -s ") || !strings.Contains(msgs[0], "thread-1") {
+		t.Fatalf("재개 인자 = %q, 원하는 값 exec resume ... thread-1", msgs)
 	}
+}
+
+func envValue(env []string, key string) string {
+	prefix := key + "="
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			return strings.TrimPrefix(entry, prefix)
+		}
+	}
+	return ""
 }
 
 func TestParseJSONLLargeMessage(t *testing.T) {
