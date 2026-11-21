@@ -4,7 +4,7 @@
 
 ## 구조
 
-`cmd/a2a-acp-bridge` 는 진입점만 두고, 기능은 `internal/` 패키지로 나눈다. 의존 방향은 `cli → mcp·a2a → dispatch → acp·codex·board·agents` 한 방향이다. 하위 패키지는 상위 패키지를 import 하지 않는다.
+`cmd/a2a-acp-bridge` 는 진입점만 두고, 기능은 `internal/` 패키지로 나눈다. 의존 방향은 `cli → mcp·a2a → dispatch → acp·codex·claude·board·agents` 한 방향이다. 하위 패키지는 상위 패키지를 import 하지 않는다.
 
 | 패키지 | 책임 |
 |---|---|
@@ -13,6 +13,7 @@
 | `internal/acp` | ACP 프로토콜, 상주 워커, 세션 풀, `session/list` |
 | `internal/acp/acptest` | 테스트용 모의 ACP 에이전트 |
 | `internal/codex` | `codex exec` 러너 |
+| `internal/claude` | `claude -p --output-format json` 러너(Claude Code 위임) |
 | `internal/board` | 공유 보드(태스크·메시지·명명 세션), flock + 임시 파일 원자 저장 |
 | `internal/agents` | Agent Card, 에이전트 레지스트리 |
 | `internal/mcp`, `internal/a2a` | MCP stdio 서버, A2A HTTP 서버 |
@@ -38,7 +39,7 @@ go build -o ~/.local/bin/a2a-acp-bridge ./cmd/a2a-acp-bridge
 - 작업마다 GitHub 이슈를 먼저 연다. 브랜치는 `batch/<agent>-<YYYYMMDD>-<8자리 hex>`(`openssl rand -hex 4`) 이다.
 - 커밋 제목은 `[<모델명>] <type>: <설명> (#N)` 이다. 커밋 작성자는 에이전트 계정(`claude-ai`·`codex-ai`·`agy-ai` `@doksam.com`)으로 한다.
 - PR 본문에 `Closes #N` 을 쓴다. 머지는 merge commit 으로 한다(squash 금지). 머지 판정은 사용자(LeeYudok)가 한다.
-- `main` 에 직접 push 하지 않는다. 항상 `batch/*` 브랜치와 PR 로 올린다. 레포가 private·Free 플랜이라 GitHub 브랜치 보호를 걸 수 없어(2026-11-22 확인, API 403) 이 규칙으로 대신한다.
+- `main` 에 직접 push 하지 않는다. 항상 `batch/*` 브랜치와 PR 로 올린다. `main` 은 GitHub 브랜치 보호(PR 필수, 관리자 포함, force push·삭제 금지)가 걸려 있고, 머지는 merge commit 만 허용한다(2026-11-22 public 전환 후 적용).
 - 혼자 하는 작업이 아니면 에이전트마다 자기 git worktree 를 쓴다. 남의 워크트리를 직접 고치지 않는다.
 
 ## 협업 규칙 — 이슈 기반 담당·핸드오프·이어받기
@@ -86,6 +87,7 @@ go build -o ~/.local/bin/a2a-acp-bridge ./cmd/a2a-acp-bridge
 ### 4. 브리지로 서로 부를 때
 
 - 발신자를 밝힌다: `A2A_AGENT_ID=<나>` 를 두거나 `-from <나>` 를 준다. 없으면 보드에 `user` 로 기록된다.
-- 받는 쪽 수신함: `a2a-acp-bridge inbox <agy|codex|claude>`.
+- 받는 쪽 수신함: `a2a-acp-bridge inbox <agy|codex|claude|user>`.
+- 서로에게 일을 맡길 때: `ask-agy`·`ask-codex`·`ask-claude`(Claude 는 기본 `-permission-mode plan`, 수정까지 맡길 땐 `acceptEdits`). 응답은 발신자 수신함에도 남는다.
 - 브리지 프로세스를 여러 개 동시에 띄울 때는 PR #6 이후 바이너리를 쓴다. 그 이전 바이너리는 보드 `.tmp` 경로가 고정이라 동시에 쓰면 rename 이 실패한다.
 - 할당량·토큰 한도에 걸리면 이슈 #8 이나 담당 이슈에 "언제까지 불가" 를 남긴다. 남은 에이전트는 그 사이 그 에이전트 담당 작업을 위 3절대로 처리한다.
