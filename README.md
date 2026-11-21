@@ -103,23 +103,6 @@ internal/
 
 의존 방향은 `cli → mcp·a2a → dispatch → acp·codex·board·agents` 한 방향이다. 하위 패키지는 상위 패키지를 import 하지 않는다. 테스트는 패키지마다 따로 있고, 모의 ACP 서버가 필요한 패키지는 `TestMain` 에서 `acptest.Main(m)` 을 부른다.
 
---- | :--- | :--- |
-| `main.go` | 249 | CLI 엔트리포인트, `-timeout`·`-cwd` 파싱 및 서브커맨드 라우팅 |
-| `board.go` | 268 | 공유 보드(`Board`) 자료구조, 에이전트 카드, 태스크·메시지 상태 갱신 |
-| `board_sessions.go` | 238 | 수신함 조회, 태스크 조회, 명명 세션(`NamedSession`) 생성·조회·종료 |
-| `board_store.go` | 95 | 파일 락 래퍼(`withLock`), 고유 임시파일(`os.CreateTemp`) 기반 원자적 저장 |
-| `board_lock_unix.go` | 35 | Unix `flock` 기반 보드 다중 프로세스 배타 락 |
-| `board_lock_other.go` | 7 | 비유닉스 환경 보드 파일 락 폴백 |
-| `agy_history.go` | 64 | `agy-sessions` 서브커맨드 및 `session/list` 페이지 조회 |
-| `clients.go` | 269 | ACP 스트림 파서, 역방향 권한 요청 자동 응답기, Codex JSONL 실행기 |
-| `pool.go` | 294 | 상주 ACP 워커 풀(`SessionPool`), `PromptWithOptions`, 턴 취소·모드·모델 제어 |
-| `pool_worker.go` | 295 | 개별 `acpWorker` 스폰, `session/set_mode`·`session/set_model` 선적용, 프롬프트 턴 실행 |
-| `server.go` | 249 | MCP 도구 스키마 정의(`MCPTools`), `Dispatcher` 라우팅, 비동기 큐(`asyncWG`) |
-| `server_transport.go` | 274 | Codex 위임 실행, `acp_session_control` 처리, MCP stdio JSON-RPC 서버 루프 |
-| `server_http.go` | 71 | Go 1.22+ `http.ServeMux` 기반 A2A HTTP 서버 (`/.well-known/agent.json`, `/a2a`) |
-| `bridge_test.go` | 282 | 모의 ACP 서버 기반 세션 풀 재사용·리플레이 억제·비동기 큐·MCP·HTTP 통합 테스트 |
-| `bridge_improvements_test.go` | 246 | 다중 고루틴·멀티프로세스 보드 락, 모드·모델 선적용, CLI 플래그·`sync` intent 테스트 |
-
 ---
 
 ## 4. 설치 및 MCP 등록
@@ -167,11 +150,11 @@ MCP 서버(`a2a-acp-bridge mcp`)는 아래 7개 도구를 노출한다(2026-11-2
 | 도구 이름 | 언제 쓰나 | 필수 인자 | 선택 인자 |
 | :--- | :--- | :--- | :--- |
 | `a2a_discover_agents` | 사용 가능한 에이전트 카드, 열린 명명 세션, 최근 태스크 10건을 확인할 때 | 없음 | 없음 |
-| `acp_delegate_to_agy` | AGY(`agy acp`)에게 코드 작성·분석·리팩터링을 맡길 때 | `prompt` | `session_name`, `session_id`, `mode`, `model`, `async`, `cwd` |
-| `a2a_delegate_to_codex` | Codex(`codex exec`)에게 교차 코드 리뷰나 비대화형 작업을 맡길 때 | `prompt` | `session_name`, `thread_id`, `sandbox`, `async`, `cwd` |
+| `acp_delegate_to_agy` | AGY(`agy acp`)에게 코드 작성·분석·리팩터링을 맡길 때 | `prompt` | `session_name`, `session_id`, `mode`, `model`, `async`, `cwd`, `from_agent` |
+| `a2a_delegate_to_codex` | Codex(`codex exec`)에게 교차 코드 리뷰나 비대화형 작업을 맡길 때 | `prompt` | `session_name`, `thread_id`, `sandbox`, `async`, `cwd`, `from_agent` |
 | `acp_session_control` | 상주 세션 상태를 보거나 실행 중 취소·모드 변경·모델 변경·종료할 때 | `action` | `session`, `mode`, `model`, `cwd` |
 | `a2a_send_message` | 에이전트 직접 실행 없이 공유 보드에 메시지·태스크만 남길 때 (`intent`: `delegate`/`review`/`reply`/`chat`/`sync`) | `from_agent`, `to_agent`, `content` | `intent`, `task_id` |
-| `a2a_receive_messages` | 특정 에이전트(`agy` 또는 `codex`) 앞으로 온 메시지를 읽을 때 | `agent_id` | `unread_only`, `mark_read` |
+| `a2a_receive_messages` | 특정 에이전트(`agy`·`codex`·`claude`) 앞으로 온 메시지를 읽을 때 | `agent_id` | `unread_only`, `mark_read` |
 | `a2a_task_status` | 특정 `task_id`의 진행 상태와 대화 내역을 조회하거나 상태를 바꿀 때 | 없음 | `task_id`, `state` |
 
 ### 5.1 `acp_delegate_to_agy` 호출 및 응답 예
