@@ -53,7 +53,7 @@ func Cards() []Card {
 		{
 			ID:        "agy",
 			Name:      "Google Antigravity (AGY)",
-			Version:   "1.5.9",
+			Version:   "1.5.14",
 			Protocols: []string{"ACP-stdio-jsonrpc-2.0", "A2A-1.0", "MCP"},
 			Endpoint:  "agy acp",
 			Capabilities: map[string]bool{
@@ -75,7 +75,7 @@ func Cards() []Card {
 		{
 			ID:        "codex",
 			Name:      "OpenAI Codex CLI",
-			Version:   "0.169.0",
+			Version:   "0.170.0",
 			Protocols: []string{"Codex-JSONL-exec", "Codex-app-server", "A2A-1.0", "MCP"},
 			Endpoint:  "codex exec --json",
 			Capabilities: map[string]bool{
