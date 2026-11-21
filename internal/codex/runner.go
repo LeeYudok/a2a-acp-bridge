@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/LeeYudok/a2a-acp-bridge/internal/gate"
@@ -70,6 +71,7 @@ func ParseJSONL(stdout, initialThreadID string) (string, []string, error) {
 // Run 은 Codex 에 프롬프트를 보낸다. threadID 가 있으면 그 스레드를 이어간다.
 // 개인 게이트가 사용자 확인을 요구하면 같은 스레드에서 한 번 더 답한다.
 func Run(ctx context.Context, cwd, sandbox, promptText, threadID string) (Result, error) {
+	sandbox = effectiveSandbox(sandbox, threadID)
 	tid, msgs, err := runOnce(ctx, cwd, sandbox, promptText, threadID)
 	if err != nil {
 		return Result{}, err
@@ -95,12 +97,12 @@ func lastMessage(msgs []string) string {
 }
 
 func runOnce(ctx context.Context, cwd, sandbox, promptText, threadID string) (string, []string, error) {
-	if sandbox == "" {
-		sandbox = "workspace-write"
-	}
-	args := []string{"exec", "--skip-git-repo-check", "--json", "-s", sandbox, promptText}
+	sandbox = effectiveSandbox(sandbox, threadID)
+	var args []string
 	if threadID != "" {
-		args = []string{"exec", "resume", "--skip-git-repo-check", "--json", threadID, promptText}
+		args = []string{"-s", sandbox, "exec", "resume", "--skip-git-repo-check", "--json", threadID, promptText}
+	} else {
+		args = []string{"-s", sandbox, "exec", "--skip-git-repo-check", "--json", promptText}
 	}
 	cmdName := "codex"
 	if parts := strings.Fields(os.Getenv("A2A_CODEX_COMMAND")); len(parts) > 0 {
@@ -109,6 +111,7 @@ func runOnce(ctx context.Context, cwd, sandbox, promptText, threadID string) (st
 	}
 	cmd := exec.CommandContext(ctx, cmdName, args...)
 	cmd.Dir = cwd
+	cmd.Env = childEnv(cwd)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -127,6 +130,54 @@ func runOnce(ctx context.Context, cwd, sandbox, promptText, threadID string) (st
 		return "", nil, outputError("parse codex exec stdout", errors.New("no thread ID or agent messages"), stderr.String())
 	}
 	return tid, msgs, nil
+}
+
+// effectiveSandbox 는 생략된 샌드박스 정책을 정한다. Codex 0.170.0의 resume은
+// 기존 스레드 정책을 복원하지 않고 현재 설정을 다시 적용하므로, 재개는 읽기 전용을 기본으로 둔다.
+func effectiveSandbox(sandbox, threadID string) string {
+	if sandbox != "" {
+		return sandbox
+	}
+	if threadID != "" {
+		return "read-only"
+	}
+	return "workspace-write"
+}
+
+// childEnv 는 부모 Codex 의 실행 문맥을 자식에게 넘기지 않고, 필요하면 대상 CODEX_HOME 만 교체한다.
+func childEnv(cwd string) []string {
+	targetHome := os.Getenv("A2A_CODEX_HOME")
+	pwd := ""
+	if cwd != "" {
+		pwd = cwd
+		if abs, err := filepath.Abs(cwd); err == nil {
+			pwd = abs
+		}
+	}
+	env := make([]string, 0, len(os.Environ())+1)
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		switch key {
+		case "CODEX_SESSION_ID", "CODEX_THREAD_ID", "CODEX_TOOL_CALL_ID":
+			continue
+		case "CODEX_HOME":
+			if targetHome != "" {
+				continue
+			}
+		case "PWD":
+			if pwd != "" {
+				continue
+			}
+		}
+		env = append(env, entry)
+	}
+	if targetHome != "" {
+		env = append(env, "CODEX_HOME="+targetHome)
+	}
+	if pwd != "" {
+		env = append(env, "PWD="+pwd)
+	}
+	return env
 }
 
 // outputError 는 오류에 stderr 진단 내용을 덧붙인다
