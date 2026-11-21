@@ -87,8 +87,14 @@ go build -o ~/.local/bin/a2a-acp-bridge ./cmd/a2a-acp-bridge
 ### 4. 브리지로 서로 부를 때
 
 - 발신자를 밝힌다: `A2A_AGENT_ID=<나>` 를 두거나 `-from <나>` 를 준다. 없으면 보드에 `user` 로 기록된다.
-- 받는 쪽 수신함: `a2a-acp-bridge inbox <agy|codex|claude|user>`.
+- 받는 쪽 수신함: `a2a-acp-bridge inbox [-peek] <agy|codex|claude|user|<agent_id>>` (`-peek` 은 읽음 표시 없이 조회한다).
 - 실시간 변화 감시: `a2a-acp-bridge watch`(기본 1초 폴링, `-interval`·`-agent`·`-all`·`-timeout`). 새 메시지·읽음·태스크 상태 변화를 JSON 이벤트 한 줄로 출력한다.
 - 서로에게 일을 맡길 때: `ask-agy`·`ask-codex`·`ask-claude`(Claude 는 기본 `-permission-mode plan`, 수정까지 맡길 땐 `acceptEdits`). 응답은 발신자 수신함에도 남는다.
 - 브리지 프로세스를 여러 개 동시에 띄울 때는 PR #6 이후 바이너리를 쓴다. 그 이전 바이너리는 보드 `.tmp` 경로가 고정이라 동시에 쓰면 rename 이 실패한다.
 - 할당량·토큰 한도에 걸리면 이슈 #8 이나 담당 이슈에 "언제까지 불가" 를 남긴다. 남은 에이전트는 그 사이 그 에이전트 담당 작업을 위 3절대로 처리한다.
+
+### 5. 오케스트레이터 지휘권 승계(Failover) 및 다중 에이전트(N-agent) 확장
+
+- **N-에이전트 등록**: `agy`·`codex`·`claude` 외에 `hermes`, `opencode` 등 소문자 slug(`^[a-z0-9][a-z0-9-]{0,23}$`) 에이전트를 `~/.local/share/a2a-acp-bridge/agents.json`(`A2A_AGENTS_FILE`) 에 추가해 코드 수정 없이 참여·발견할 수 있다.
+- **단일 지휘 리스(Lease)**: 특정 에이전트가 영구 지휘권을 갖지 않으며, 단 한 명만 `term` + `lease_until` 리스를 보유한다. 보드 원자 CAS 는 `a2a-acp-bridge coord <status|claim|renew|handoff>` 또는 MCP 도구 `a2a_coordinator_lease` 로 처리한다.
+- **승계·복귀**: 현 지휘자가 중단·오류·할당량 초과·리스 만료 상태면 남은 에이전트가 이슈 #8 예고 후 `term + 1` 리스를 확정(`coord claim -expected-term <N> [-force]`)하고 브로드캐스트한다. 복귀한 전임 지휘자는 `#8` 및 보드의 최신 `term` 을 인정하고 일반 작업자/리뷰어로 합류한다.
