@@ -1,12 +1,19 @@
 package dispatch
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/LeeYudok/a2a-acp-bridge/internal/board"
+)
+
+const (
+	maxExactFloat53    = float64(uint64(1) << 53)
+	maxLeaseTTLSeconds = int64(math.MaxInt64 / int64(time.Second))
 )
 
 func (d *Dispatcher) callCoordinatorLease(args map[string]any) (any, error) {
@@ -81,9 +88,15 @@ func parseExpectedTerm(args map[string]any) (uint64, error) {
 			return 0, fmt.Errorf("a2a_coordinator_lease: expected_term 은 음이 아닌 정수여야 합니다: %d", n)
 		}
 		return uint64(n), nil
+	case json.Number:
+		v, err := strconv.ParseUint(strings.TrimSpace(n.String()), 10, 64)
+		if err != nil {
+			return 0, fmt.Errorf("a2a_coordinator_lease: expected_term 은 uint64 정수여야 합니다: %q", n.String())
+		}
+		return v, nil
 	case float64:
-		if math.IsNaN(n) || math.IsInf(n, 0) || n < 0 || math.Trunc(n) != n {
-			return 0, fmt.Errorf("a2a_coordinator_lease: expected_term 은 음이 아닌 정수여야 합니다: %v", n)
+		if math.IsNaN(n) || math.IsInf(n, 0) || n < 0 || math.Trunc(n) != n || n > maxExactFloat53 {
+			return 0, fmt.Errorf("a2a_coordinator_lease: expected_term 은 정밀도 손실 없는 음이 아닌 정수여야 합니다: %v", n)
 		}
 		return uint64(n), nil
 	default:
@@ -103,27 +116,32 @@ func parseLeaseTTL(args map[string]any, action string) (time.Duration, error) {
 	case int64:
 		sec = n
 	case uint64:
+		if n > uint64(maxLeaseTTLSeconds) {
+			return 0, fmt.Errorf("a2a_coordinator_lease: ttl_seconds 범위 초과(최대 %d초): %d", maxLeaseTTLSeconds, n)
+		}
 		sec = int64(n)
+	case json.Number:
+		v, err := strconv.ParseInt(strings.TrimSpace(n.String()), 10, 64)
+		if err != nil {
+			return 0, fmt.Errorf("a2a_coordinator_lease: ttl_seconds 는 정수여야 합니다: %q", n.String())
+		}
+		sec = v
 	case float64:
-		if math.IsNaN(n) || math.IsInf(n, 0) || math.Trunc(n) != n {
-			return 0, fmt.Errorf("a2a_coordinator_lease: ttl_seconds 는 정수여야 합니다: %v", n)
+		if math.IsNaN(n) || math.IsInf(n, 0) || math.Trunc(n) != n || n < 0 || n > float64(maxLeaseTTLSeconds) {
+			return 0, fmt.Errorf("a2a_coordinator_lease: ttl_seconds 는 범위(0..=%d) 내 정수여야 합니다: %v", maxLeaseTTLSeconds, n)
 		}
 		sec = int64(n)
 	default:
 		return 0, fmt.Errorf("a2a_coordinator_lease: ttl_seconds 형식이 잘못되었습니다(%T)", raw)
 	}
-	if sec < 0 || (sec == 0 && (action == "claim" || action == "renew")) {
-		if sec == 0 && args["ttl_seconds"] != nil {
-			// CLI coord command may pass 0 for handoff; keep claim/renew default when 0 unless negative.
-			if sec < 0 {
-				return 0, fmt.Errorf("a2a_coordinator_lease: ttl_seconds 는 음수일 수 없습니다: %d", sec)
-			}
+	if sec < 0 || sec > maxLeaseTTLSeconds {
+		return 0, fmt.Errorf("a2a_coordinator_lease: ttl_seconds 는 0..=%d 범위여야 합니다: %d", maxLeaseTTLSeconds, sec)
+	}
+	if sec == 0 {
+		if action == "handoff" {
 			return board.DefaultLeaseTTL, nil
 		}
 		return 0, fmt.Errorf("a2a_coordinator_lease: ttl_seconds 는 양의 정수여야 합니다: %d", sec)
-	}
-	if sec == 0 {
-		return board.DefaultLeaseTTL, nil
 	}
 	return time.Duration(sec) * time.Second, nil
 }

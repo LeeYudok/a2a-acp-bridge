@@ -2,9 +2,12 @@ package dispatch
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"math"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/LeeYudok/a2a-acp-bridge/internal/agents"
 	"github.com/LeeYudok/a2a-acp-bridge/internal/board"
@@ -119,4 +122,50 @@ func TestCoordinatorLeaseMCPDispatch(t *testing.T) {
 	}); !errors.Is(err, board.ErrTermMismatch) {
 		t.Fatalf("expected_term 불일치는 ErrTermMismatch 여야 합니다: %v", err)
 	}
+
+	// json.Number 는 2^53 초과 uint64 도 정밀도 손실 없이 파싱하고, lossy float64·TTL 오버플로는 거부해야 함
+	if _, err := d.CallTool(ctx, "a2a_coordinator_lease", map[string]any{
+		"action":        "claim",
+		"agent_id":      "codex",
+		"expected_term": json.Number("18446744073709551615"),
+		"force":         true,
+	}); !errors.Is(err, board.ErrTermMismatch) {
+		t.Fatalf("json.Number MaxUint64 는 정밀 파싱되어 ErrTermMismatch 여야 합니다: %v", err)
+	}
+	if _, err := d.CallTool(ctx, "a2a_coordinator_lease", map[string]any{
+		"action":        "claim",
+		"agent_id":      "codex",
+		"expected_term": float64(uint64(1)<<53 + 2),
+		"force":         true,
+	}); err == nil {
+		t.Fatal("2^53 초과 float64 expected_term 은 정밀도 손실로 거부돼야 합니다")
+	}
+	if _, err := d.CallTool(ctx, "a2a_coordinator_lease", map[string]any{
+		"action":        "claim",
+		"agent_id":      "codex",
+		"expected_term": float64(2),
+		"ttl_seconds":   uint64(math.MaxUint64),
+	}); err == nil {
+		t.Fatal("MaxUint64 ttl_seconds 는 Duration 오버플로 방지로 거부돼야 합니다")
+	}
+	if _, err := d.CallTool(ctx, "a2a_coordinator_lease", map[string]any{
+		"action":        "claim",
+		"agent_id":      "codex",
+		"expected_term": float64(2),
+		"ttl_seconds":   json.Number("9223372037"),
+	}); err == nil {
+		t.Fatal("Duration 최댓값 초과 ttl_seconds 는 거부돼야 합니다")
+	}
+	if _, err := d.CallTool(ctx, "a2a_coordinator_lease", map[string]any{
+		"action":        "claim",
+		"agent_id":      "codex",
+		"expected_term": float64(2),
+		"ttl_seconds":   0,
+	}); err == nil {
+		t.Fatal("claim 의 ttl_seconds=0 은 거부돼야 합니다")
+	}
+	if _, err := parseLeaseTTL(map[string]any{"ttl_seconds": int64(300)}, "renew"); err != nil {
+		t.Fatalf("정상 ttl_seconds 파싱 실패: %v", err)
+	}
+	_ = time.Second
 }
