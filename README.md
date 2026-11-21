@@ -369,7 +369,7 @@ a2a-acp-bridge inbox claude
 # 발신자를 밝히지 않으면 user 수신함으로 돌아온다
 a2a-acp-bridge inbox user
 
-# 10. 공유 보드 폴링 감시 (새 메시지·읽음·태스크 상태 변화를 JSON 이벤트로 출력)
+# 10. 공유 보드 폴링 감시 (새 메시지·읽음·태스크 상태·지휘권 리스 변화를 JSON 이벤트로 출력)
 a2a-acp-bridge watch
 a2a-acp-bridge watch -agent codex -interval 2s -timeout 5m
 a2a-acp-bridge watch -all
@@ -385,7 +385,7 @@ a2a-acp-bridge serve-a2a -addr 127.0.0.1:8765
 | 서브커맨드 | 플래그 |
 | :--- | :--- |
 | `ask-agy` | `-s`, `-session-id`, `-mode`(`auto`·`accept-edits`·`plan`), `-model`, `-no-wait`, `-cwd`, `-timeout`, `-from` |
-| `ask-codex` | `-s`, `-thread-id`, `-sandbox`(`read-only`·`workspace-write`, 새 실행 기본 `workspace-write`, 재개 기본 `read-only`), `-no-wait`, `-cwd`, `-timeout`, `-from` |
+| `ask-codex` | `-s`, `-thread-id`, `-sandbox`(`read-only`·`workspace-write`, 새 실행 기본 `workspace-write`, 재개 기본 `read-only`, `-s` 명명 세션은 저장된 sandbox 재사용), `-no-wait`, `-cwd`, `-timeout`, `-from` |
 | `ask-claude` | `-s`, `-session-id`, `-permission-mode`(`plan`·`default`·`acceptEdits`, 기본 `plan`), `-no-wait`, `-cwd`, `-timeout`, `-from` |
 | `agy-sessions` | `-cursor`, `-cwd`, `-timeout` |
 | `sessions`·`cancel`·`set-mode`·`set-model`·`close` | `-s`(또는 첫 위치 인자), `-mode`, `-model`, `-cwd`, `-timeout` |
@@ -395,7 +395,7 @@ a2a-acp-bridge serve-a2a -addr 127.0.0.1:8765
 | `watch` | `-agent`(기본 `A2A_AGENT_ID` 또는 `user`), `-interval`(기본 `1s`), `-all`, `-timeout`(기본 `0`, 종료 시그널까지) |
 | `serve-a2a` | `-addr`(기본 `127.0.0.1:8765`) |
 
-`-from`의 값은 `agy`, `codex`, `claude`, `user` 중 하나다. 없으면 `A2A_AGENT_ID`, 그것도 없으면 `user`로 기록한다. `-no-wait`는 결과 JSON을 즉시 출력하지만, CLI 프로세스는 백그라운드 작업이 끝날 때까지 종료하지 않는다. 백그라운드 작업에도 `-timeout` 이 적용된다(MCP 서버의 async 작업은 상한 없음). `-cwd` 를 주지 않고 `-s` 로 명명 세션을 이어가면 그 세션을 만든 디렉터리에서 실행한다. Claude Code·ACP 세션은 프로젝트 디렉터리에 묶여 있어 다른 디렉터리에서는 이어지지 않기 때문이다. `inbox`는 조회한 메시지를 읽음 처리한다(`-all`을 줘도 같다). 남의 수신함을 확인만 할 때는 `-peek` 을 쓴다. `watch`는 보드를 폴링해서 관련 에이전트(또는 `-all`)의 새 메시지(`type: message`, `op: new`), 읽음(`op: read`), 태스크 상태 변화(`type: task`)를 JSON 이벤트 한 줄씩 출력하고, 저장소를 바꾸지 않는다. 폴링이라 한 주기 안에 생성과 읽음이 함께 일어나면 `op: read` 가 나오지 않고, 태스크 중간 상태를 건너뛸 수 있으며, 지휘권 리스 변화는 보이지 않는다(#21).
+`-from`의 값은 등록된 에이전트 ID(내장 `agy`·`codex`·`claude`와 `agents.json` 의 동적 에이전트) 또는 `user` 다. 없으면 `A2A_AGENT_ID`, 그것도 없으면 `user`로 기록한다. `-no-wait`는 결과 JSON을 즉시 출력하지만, CLI 프로세스는 백그라운드 작업이 끝날 때까지 종료하지 않는다. 백그라운드 작업에도 `-timeout` 이 적용된다(MCP 서버의 async 작업은 상한 없음). `-cwd` 를 주지 않고 `-s` 로 명명 세션을 이어가면 그 세션을 만든 디렉터리에서 실행한다. Claude Code·ACP 세션은 프로젝트 디렉터리에 묶여 있어 다른 디렉터리에서는 이어지지 않기 때문이다. `inbox`는 조회한 메시지를 읽음 처리한다(`-all`을 줘도 같다). 남의 수신함을 확인만 할 때는 `-peek` 을 쓴다. `watch`는 보드를 폴링해서 관련 에이전트(또는 `-all`)의 새 메시지(`type: message`, `op: new`), 읽음(`op: read`), 태스크 상태 변화(`type: task`), 지휘권 리스 변화(`type: coordinator`, `op: state`)를 JSON 이벤트 한 줄씩 출력하고, 저장소를 바꾸지 않는다. 리스 이벤트는 `from_agent`(직전 리더)·`to_agent`(현 리더)·`content`(사유)와 리스 전체(`coordinator`)를 담고, 리더·직전 리더·이양 대상·`active_agents` 에 든 에이전트(또는 `-all`)에게 나온다. `coord renew` 로 만료 시각만 바뀌어도 나온다. 한 주기 안에 생성과 읽음이 함께 일어나면 `op: new` 와 `op: read` 가 둘 다 나온다. 다만 폴링이라 한 주기 안의 태스크 중간 상태와 리스 중간 변화는 건너뛰고 마지막 상태만 보인다(#21).
 
 ---
 
