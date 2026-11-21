@@ -49,13 +49,17 @@ func TestRunUsesTargetCodexHome(t *testing.T) {
 	}
 	script := filepath.Join(t.TempDir(), "codex-home")
 	body := "#!/bin/sh\n" +
+		"session='<unset>'; [ \"${CODEX_SESSION_ID+x}\" = x ] && session=\"$CODEX_SESSION_ID\"\n" +
+		"thread='<unset>'; [ \"${CODEX_THREAD_ID+x}\" = x ] && thread=\"$CODEX_THREAD_ID\"\n" +
+		"tool='<unset>'; [ \"${CODEX_TOOL_CALL_ID+x}\" = x ] && tool=\"$CODEX_TOOL_CALL_ID\"\n" +
 		`printf '%s\n' '{"type":"thread.started","thread_id":"th-home"}'` + "\n" +
-		`printf '{"type":"item.completed","item":{"type":"agent_message","text":"home=%s;session=%s;thread=%s;tool=%s"}}\n' "$CODEX_HOME" "$CODEX_SESSION_ID" "$CODEX_THREAD_ID" "$CODEX_TOOL_CALL_ID"` + "\n"
+		`printf '{"type":"item.completed","item":{"type":"agent_message","text":"home=%s;session=%s;thread=%s;tool=%s;pwd=%s;cwd=%s"}}\n' "$CODEX_HOME" "$session" "$thread" "$tool" "$PWD" "$(/bin/pwd -P)"` + "\n"
 	if err := os.WriteFile(script, []byte(body), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	parentHome := filepath.Join(t.TempDir(), "deepseek-home")
-	targetHome := filepath.Join(t.TempDir(), "official-home")
+	targetHome := filepath.Join(t.TempDir(), "official-home ")
+	workDir := t.TempDir()
 	t.Setenv("A2A_CODEX_COMMAND", script)
 	t.Setenv("A2A_CODEX_HOME", targetHome)
 	t.Setenv("CODEX_HOME", parentHome)
@@ -63,16 +67,66 @@ func TestRunUsesTargetCodexHome(t *testing.T) {
 	t.Setenv("CODEX_THREAD_ID", "parent-thread")
 	t.Setenv("CODEX_TOOL_CALL_ID", "parent-tool")
 
-	res, err := Run(context.Background(), t.TempDir(), "read-only", "질문", "")
+	res, err := Run(context.Background(), workDir, "read-only", "질문", "")
 	if err != nil {
 		t.Fatalf("Run 실패: %v", err)
 	}
-	want := "home=" + targetHome + ";session=;thread=;tool="
+	physicalWorkDir, err := filepath.EvalSymlinks(workDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "home=" + targetHome + ";session=<unset>;thread=<unset>;tool=<unset>;pwd=" + workDir + ";cwd=" + physicalWorkDir
 	if res.Response != want {
 		t.Fatalf("자식 환경 = %q, 원하는 값 %q", res.Response, want)
 	}
 	if got := os.Getenv("CODEX_HOME"); got != parentHome {
 		t.Fatalf("부모 CODEX_HOME = %q, 원하는 값 %q", got, parentHome)
+	}
+}
+
+func TestRunKeepsParentCodexHomeWithoutTarget(t *testing.T) {
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("sh is unavailable")
+	}
+	script := filepath.Join(t.TempDir(), "codex-home")
+	body := "#!/bin/sh\n" +
+		`printf '%s\n' '{"type":"thread.started","thread_id":"th-parent-home"}'` + "\n" +
+		`printf '{"type":"item.completed","item":{"type":"agent_message","text":"%s"}}\n' "$CODEX_HOME"` + "\n"
+	if err := os.WriteFile(script, []byte(body), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	parentHome := filepath.Join(t.TempDir(), "parent-home")
+	t.Setenv("A2A_CODEX_COMMAND", script)
+	t.Setenv("A2A_CODEX_HOME", "")
+	t.Setenv("CODEX_HOME", parentHome)
+
+	res, err := Run(context.Background(), t.TempDir(), "read-only", "질문", "")
+	if err != nil {
+		t.Fatalf("Run 실패: %v", err)
+	}
+	if res.Response != parentHome {
+		t.Fatalf("자식 CODEX_HOME = %q, 원하는 값 %q", res.Response, parentHome)
+	}
+}
+
+func TestResumePassesSandbox(t *testing.T) {
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("sh is unavailable")
+	}
+	script := filepath.Join(t.TempDir(), "codex-resume")
+	body := "#!/bin/sh\n" +
+		`printf '%s\n' '{"type":"thread.started","thread_id":"thread-1"}'` + "\n" +
+		`printf '{"type":"item.completed","item":{"type":"agent_message","text":"%s"}}\n' "$*"` + "\n"
+	if err := os.WriteFile(script, []byte(body), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("A2A_CODEX_COMMAND", script)
+	_, msgs, err := runOnce(context.Background(), t.TempDir(), "read-only", "질문", "thread-1")
+	if err != nil {
+		t.Fatalf("runOnce 실패: %v", err)
+	}
+	if len(msgs) != 1 || !strings.HasPrefix(msgs[0], "-s read-only exec resume ") || !strings.Contains(msgs[0], "thread-1") {
+		t.Fatalf("재개 인자 = %q, 원하는 값 -s read-only exec resume ... thread-1", msgs)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/LeeYudok/a2a-acp-bridge/internal/gate"
@@ -98,9 +99,9 @@ func runOnce(ctx context.Context, cwd, sandbox, promptText, threadID string) (st
 	if sandbox == "" {
 		sandbox = "workspace-write"
 	}
-	args := []string{"exec", "--skip-git-repo-check", "--json", "-s", sandbox, promptText}
+	args := []string{"-s", sandbox, "exec", "--skip-git-repo-check", "--json", promptText}
 	if threadID != "" {
-		args = []string{"exec", "resume", "--skip-git-repo-check", "--json", threadID, promptText}
+		args = []string{"-s", sandbox, "exec", "resume", "--skip-git-repo-check", "--json", threadID, promptText}
 	}
 	cmdName := "codex"
 	if parts := strings.Fields(os.Getenv("A2A_CODEX_COMMAND")); len(parts) > 0 {
@@ -109,7 +110,7 @@ func runOnce(ctx context.Context, cwd, sandbox, promptText, threadID string) (st
 	}
 	cmd := exec.CommandContext(ctx, cmdName, args...)
 	cmd.Dir = cwd
-	cmd.Env = childEnv()
+	cmd.Env = childEnv(cwd)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -131,8 +132,15 @@ func runOnce(ctx context.Context, cwd, sandbox, promptText, threadID string) (st
 }
 
 // childEnv 는 부모 Codex 의 실행 문맥을 자식에게 넘기지 않고, 필요하면 대상 CODEX_HOME 만 교체한다.
-func childEnv() []string {
-	targetHome := strings.TrimSpace(os.Getenv("A2A_CODEX_HOME"))
+func childEnv(cwd string) []string {
+	targetHome := os.Getenv("A2A_CODEX_HOME")
+	pwd := ""
+	if cwd != "" {
+		pwd = cwd
+		if abs, err := filepath.Abs(cwd); err == nil {
+			pwd = abs
+		}
+	}
 	env := make([]string, 0, len(os.Environ())+1)
 	for _, entry := range os.Environ() {
 		key, _, _ := strings.Cut(entry, "=")
@@ -143,11 +151,18 @@ func childEnv() []string {
 			if targetHome != "" {
 				continue
 			}
+		case "PWD":
+			if pwd != "" {
+				continue
+			}
 		}
 		env = append(env, entry)
 	}
 	if targetHome != "" {
 		env = append(env, "CODEX_HOME="+targetHome)
+	}
+	if pwd != "" {
+		env = append(env, "PWD="+pwd)
 	}
 	return env
 }
