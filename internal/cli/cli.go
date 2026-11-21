@@ -18,7 +18,7 @@ import (
 
 const defaultCommandTimeout = 3 * time.Minute
 
-const usage = "서브커맨드가 필요합니다 (mcp | serve-a2a | cards | ask-agy | agy-sessions | ask-codex | ask-claude | sessions | cancel | set-mode | set-model | close | send | inbox | coord)"
+const usage = "서브커맨드가 필요합니다 (mcp | serve-a2a | cards | ask-agy | agy-sessions | ask-codex | ask-claude | sessions | cancel | set-mode | set-model | close | send | inbox | coord | watch)"
 
 // Run 은 os.Args[1:] 를 받아 서브커맨드를 실행한다
 func Run(args []string) error {
@@ -69,6 +69,8 @@ func dispatchSubcommand(ctx context.Context, d *dispatch.Dispatcher, cwd, sub st
 		return runSendCmd(ctx, d, rest)
 	case "inbox":
 		return runInboxCmd(ctx, d, rest)
+	case "watch":
+		return runWatchCmd(ctx, d, rest)
 	case "coord":
 		return runCoordCmd(ctx, d, rest)
 	default:
