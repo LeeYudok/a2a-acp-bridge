@@ -84,6 +84,8 @@ func (d *Dispatcher) CallTool(ctx context.Context, name string, args map[string]
 		return d.callDelegateAgy(ctx, args)
 	case "a2a_delegate_to_codex":
 		return d.callDelegateCodex(ctx, args)
+	case "a2a_delegate_to_claude":
+		return d.callDelegateClaude(ctx, args)
 	case "acp_session_control":
 		return d.callSessionControl(args)
 	case "a2a_send_message":
