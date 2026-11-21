@@ -89,7 +89,9 @@ func Serve(ctx context.Context, d *dispatch.Dispatcher, in io.Reader, out io.Wri
 			continue
 		}
 		var req jsonrpc.Request
-		if err := json.Unmarshal([]byte(line), &req); err != nil {
+		dec := json.NewDecoder(strings.NewReader(line))
+		dec.UseNumber()
+		if err := dec.Decode(&req); err != nil {
 			continue
 		}
 		resp := Handle(ctx, d, req)
