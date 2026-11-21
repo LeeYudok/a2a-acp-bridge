@@ -30,6 +30,7 @@ func runAskAgyCmd(ctx context.Context, d *dispatch.Dispatcher, cwd string, rest 
 		return fmt.Errorf("ask-agy: %w", err)
 	}
 	defer cancel()
+	d.AsyncTimeout = *timeout
 	res, err := d.CallTool(cmdCtx, "acp_delegate_to_agy", map[string]any{
 		"prompt":       fs.Arg(0),
 		"session_id":   *sid,
@@ -37,7 +38,7 @@ func runAskAgyCmd(ctx context.Context, d *dispatch.Dispatcher, cwd string, rest 
 		"mode":         *mode,
 		"model":        *model,
 		"async":        *noWait,
-		"cwd":          resolveWorkDir(*workDir, cwd),
+		"cwd":          explicitFlag(fs, "cwd", *workDir),
 		"from_agent":   *from,
 	})
 	return printResult(res, err)
@@ -83,13 +84,14 @@ func runAskCodexCmd(ctx context.Context, d *dispatch.Dispatcher, cwd string, res
 		return fmt.Errorf("ask-codex: %w", err)
 	}
 	defer cancel()
+	d.AsyncTimeout = *timeout
 	res, err := d.CallTool(cmdCtx, "a2a_delegate_to_codex", map[string]any{
 		"prompt":       fs.Arg(0),
 		"thread_id":    *tid,
 		"session_name": *sname,
 		"sandbox":      *sandbox,
 		"async":        *noWait,
-		"cwd":          resolveWorkDir(*workDir, cwd),
+		"cwd":          explicitFlag(fs, "cwd", *workDir),
 		"from_agent":   *from,
 	})
 	return printResult(res, err)
@@ -171,6 +173,39 @@ func runInboxCmd(ctx context.Context, d *dispatch.Dispatcher, rest []string) err
 	res, err := d.CallTool(cmdCtx, "a2a_receive_messages", map[string]any{
 		"agent_id":    fs.Arg(0),
 		"unread_only": !*all,
+	})
+	return printResult(res, err)
+}
+
+func runAskClaudeCmd(ctx context.Context, d *dispatch.Dispatcher, cwd string, rest []string) error {
+	fs := flag.NewFlagSet("ask-claude", flag.ContinueOnError)
+	sid := fs.String("session-id", "", "이어갈 Claude Code 세션 ID")
+	sname := fs.String("s", "", "acpx 스타일의 명명 세션")
+	mode := fs.String("permission-mode", "plan", "권한 모드 (plan|default|acceptEdits)")
+	noWait := fs.Bool("no-wait", false, "비동기 큐 등록 후 즉시 반환")
+	workDir := fs.String("cwd", cwd, "작업 디렉터리")
+	timeout := fs.Duration("timeout", defaultCommandTimeout, "실행 타임아웃 (예: 3m, 10m)")
+	from := fs.String("from", "", "보드에 기록할 발신자 (agy|codex|claude|user, 기본: A2A_AGENT_ID 또는 user)")
+	if err := fs.Parse(rest); err != nil {
+		return err
+	}
+	if fs.NArg() < 1 {
+		return fmt.Errorf("ask-claude: 프롬프트 인자가 필요합니다")
+	}
+	cmdCtx, cancel, err := withCommandTimeout(ctx, *timeout)
+	if err != nil {
+		return fmt.Errorf("ask-claude: %w", err)
+	}
+	defer cancel()
+	d.AsyncTimeout = *timeout
+	res, err := d.CallTool(cmdCtx, "a2a_delegate_to_claude", map[string]any{
+		"prompt":          fs.Arg(0),
+		"session_id":      *sid,
+		"session_name":    *sname,
+		"permission_mode": *mode,
+		"async":           *noWait,
+		"cwd":             explicitFlag(fs, "cwd", *workDir),
+		"from_agent":      *from,
 	})
 	return printResult(res, err)
 }

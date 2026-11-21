@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/LeeYudok/a2a-acp-bridge/internal/acp"
 	"github.com/LeeYudok/a2a-acp-bridge/internal/agents"
@@ -37,8 +38,10 @@ type Dispatcher struct {
 	Pool       *acp.SessionPool
 	DefaultCwd string
 	// Caller 는 요청에 from_agent 가 없을 때 쓰는 발신자 ID 다. 비어 있으면 user 로 기록한다.
-	Caller  string
-	asyncWG sync.WaitGroup
+	Caller string
+	// AsyncTimeout 은 async(--no-wait) 작업의 실행 시간 상한이다. 0 이면 상한이 없다(MCP 서버 기본).
+	AsyncTimeout time.Duration
+	asyncWG      sync.WaitGroup
 }
 
 // Wait 는 비동기(--no-wait)로 큐잉된 모든 백그라운드 작업이 끝날 때까지 기다린다
@@ -84,6 +87,8 @@ func (d *Dispatcher) CallTool(ctx context.Context, name string, args map[string]
 		return d.callDelegateAgy(ctx, args)
 	case "a2a_delegate_to_codex":
 		return d.callDelegateCodex(ctx, args)
+	case "a2a_delegate_to_claude":
+		return d.callDelegateClaude(ctx, args)
 	case "acp_session_control":
 		return d.callSessionControl(args)
 	case "a2a_send_message":
@@ -108,17 +113,34 @@ func (d *Dispatcher) CallTool(ctx context.Context, name string, args map[string]
 	}
 }
 
-func (d *Dispatcher) resolveAgentSessionID(agent, explicitID, sessionName string) string {
-	if explicitID != "" {
-		return explicitID
+// asyncContext 는 async 작업용 컨텍스트다. 요청 컨텍스트와 분리하되 AsyncTimeout 은 지킨다.
+func (d *Dispatcher) asyncContext() (context.Context, context.CancelFunc) {
+	if d.AsyncTimeout > 0 {
+		return context.WithTimeout(context.Background(), d.AsyncTimeout)
 	}
-	if sessionName == "" {
-		return ""
+	return context.WithCancel(context.Background())
+}
+
+// resolveAgentSession 은 이어갈 세션 ID 와 작업 디렉터리를 정한다.
+// 명명 세션을 이어가는데 cwd 를 주지 않았으면 그 세션을 만든 디렉터리를 쓴다.
+// 에이전트 세션(Claude Code·ACP)은 프로젝트 디렉터리에 묶여 있어 다른 디렉터리에서는 이어지지 않는다.
+func (d *Dispatcher) resolveAgentSession(agent string, args map[string]any, idKey string) (string, string) {
+	id := strArg(args, idKey, "")
+	cwd := strArg(args, "cwd", "")
+	if name := strArg(args, "session_name", ""); name != "" && (id == "" || cwd == "") {
+		if rec, err := d.Board.ResolveSession(name, agent); err == nil {
+			if id == "" {
+				id = rec.SessionID
+			}
+			if cwd == "" {
+				cwd = rec.Cwd
+			}
+		}
 	}
-	if rec, err := d.Board.ResolveSession(sessionName, agent); err == nil {
-		return rec.SessionID
+	if cwd == "" {
+		cwd = d.DefaultCwd
 	}
-	return ""
+	return id, cwd
 }
 
 func (d *Dispatcher) callTaskStatus(args map[string]any) (any, error) {

@@ -18,7 +18,7 @@ import (
 
 const defaultCommandTimeout = 3 * time.Minute
 
-const usage = "서브커맨드가 필요합니다 (mcp | serve-a2a | cards | ask-agy | agy-sessions | ask-codex | sessions | cancel | set-mode | set-model | close | send | inbox)"
+const usage = "서브커맨드가 필요합니다 (mcp | serve-a2a | cards | ask-agy | agy-sessions | ask-codex | ask-claude | sessions | cancel | set-mode | set-model | close | send | inbox)"
 
 // Run 은 os.Args[1:] 를 받아 서브커맨드를 실행한다
 func Run(args []string) error {
@@ -61,6 +61,8 @@ func dispatchSubcommand(ctx context.Context, d *dispatch.Dispatcher, cwd, sub st
 		return runAgySessionsCmd(ctx, d.Pool, cwd, rest)
 	case "ask-codex":
 		return runAskCodexCmd(ctx, d, cwd, rest)
+	case "ask-claude":
+		return runAskClaudeCmd(ctx, d, cwd, rest)
 	case "sessions", "status", "cancel", "set-mode", "set-model", "close":
 		return runSessionCtrlCmd(ctx, d, cwd, sub, rest)
 	case "send":
@@ -94,6 +96,21 @@ func resolveWorkDir(flagVal, fallback string) string {
 		return flagVal
 	}
 	return fallback
+}
+
+// explicitFlag 는 플래그를 명령줄에서 직접 줬을 때만 값을 돌려준다. 안 줬으면 빈 문자열이다.
+// 위임 cwd 를 비워 두면 dispatch 가 명명 세션에 저장된 디렉터리, 그다음 현재 디렉터리를 쓴다.
+func explicitFlag(fs *flag.FlagSet, name, val string) string {
+	set := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			set = true
+		}
+	})
+	if set {
+		return val
+	}
+	return ""
 }
 
 func printResult(v any, err error) error {

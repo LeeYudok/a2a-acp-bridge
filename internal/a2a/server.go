@@ -18,6 +18,7 @@ var methodTools = map[string]string{
 	"acp/agy":     "acp_delegate_to_agy",
 	"acp/control": "acp_session_control",
 	"a2a/codex":   "a2a_delegate_to_codex",
+	"a2a/claude":  "a2a_delegate_to_claude",
 }
 
 // NewMux 는 Go 1.22+ ServeMux 로 A2A HTTP 라우터를 만든다

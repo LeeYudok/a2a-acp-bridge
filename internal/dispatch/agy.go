@@ -26,11 +26,12 @@ type agyTurn struct {
 
 func (d *Dispatcher) callDelegateAgy(ctx context.Context, args map[string]any) (AgyDelegateResult, error) {
 	sessionName := strArg(args, "session_name", "")
+	sid, cwd := d.resolveAgentSession("agy", args, "session_id")
 	turn := agyTurn{
 		from:        d.caller(args),
-		cwd:         strArg(args, "cwd", d.DefaultCwd),
+		cwd:         cwd,
+		sid:         sid,
 		prompt:      strArg(args, "prompt", ""),
-		sid:         d.resolveAgentSessionID("agy", strArg(args, "session_id", ""), sessionName),
 		sessionName: sessionName,
 		mode:        strArg(args, "mode", ""),
 		model:       strArg(args, "model", ""),
@@ -51,7 +52,9 @@ func (d *Dispatcher) callDelegateAgy(ctx context.Context, args map[string]any) (
 	d.asyncWG.Add(1)
 	go func() {
 		defer d.asyncWG.Done()
-		_, _ = d.executeAgyTurn(context.Background(), turn)
+		actx, cancel := d.asyncContext()
+		defer cancel()
+		_, _ = d.executeAgyTurn(actx, turn)
 	}()
 	return AgyDelegateResult{
 		Agent:       "agy",

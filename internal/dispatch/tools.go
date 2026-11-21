@@ -1,6 +1,9 @@
 package dispatch
 
-import "github.com/LeeYudok/a2a-acp-bridge/internal/agents"
+import (
+	"github.com/LeeYudok/a2a-acp-bridge/internal/agents"
+	"github.com/LeeYudok/a2a-acp-bridge/internal/claude"
+)
 
 // ToolSchema 는 MCP tools/list 항목이다
 type ToolSchema struct {
@@ -69,6 +72,19 @@ func Tools() []ToolSchema {
 				"async":        map[string]any{"type": "boolean", "description": "true면 백그라운드 큐에 넣고 즉시 task_id 반환"},
 				"cwd":          strProp("작업 디렉터리 (선택)"),
 				"from_agent":   fromProp(),
+			}, "prompt"),
+		},
+		{
+			Name:        "a2a_delegate_to_claude",
+			Description: "A2A 브리지를 통해 Claude Code(`claude -p --output-format json`)에게 작업/리뷰를 위임합니다. 기본 permission_mode 는 plan(읽기 전용)입니다.",
+			InputSchema: objectSchema(map[string]any{
+				"prompt":          strProp("Claude Code에게 전달할 프롬프트/작업 지시"),
+				"session_id":      strProp("이어갈 Claude Code 세션 ID (선택)"),
+				"session_name":    strProp("acpx 스타일의 논리 세션 이름 (선택)"),
+				"permission_mode": enumProp(claude.PermissionModes),
+				"async":           map[string]any{"type": "boolean", "description": "true면 백그라운드 큐에 넣고 즉시 task_id 반환"},
+				"cwd":             strProp("작업 디렉터리 (선택)"),
+				"from_agent":      fromProp(),
 			}, "prompt"),
 		},
 		{
