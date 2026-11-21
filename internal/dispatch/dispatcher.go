@@ -82,7 +82,11 @@ func (d *Dispatcher) CallTool(ctx context.Context, name string, args map[string]
 			return nil, err
 		}
 		sessions, _ := d.Board.ListSessions(false)
-		return agents.Discover(d.DefaultCwd, sessions, tasks), nil
+		disc := agents.Discover(d.DefaultCwd, sessions, tasks)
+		disc.Coordinator, _ = d.Board.GetCoordinator()
+		return disc, nil
+	case "a2a_coordinator_lease":
+		return d.callCoordinatorLease(args)
 	case "acp_delegate_to_agy":
 		return d.callDelegateAgy(ctx, args)
 	case "a2a_delegate_to_codex":
