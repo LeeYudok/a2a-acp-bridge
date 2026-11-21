@@ -191,6 +191,15 @@ MCP 서버(`a2a-acp-bridge mcp`)는 아래 7개 도구를 노출한다(2026-11-1
 
 ## 6. CLI 명령 레퍼런스
 
+### 기존 AGY 대화에 연결
+
+AGY를 시작한 디렉터리에서 `agy-sessions`를 실행한다. ACP의 `session/list` 응답에서 `sessionId`, 작업 디렉터리, 제목, 갱신 시각을 확인할 수 있다. 응답에 `nextCursor`가 있으면 `agy-sessions -cursor <nextCursor>`로 다음 목록을 조회한다.
+
+```sh
+a2a-acp-bridge agy-sessions
+a2a-acp-bridge ask-agy -session-id <sessionId> "진행 중인 작업과 검증 결과를 알려줘"
+```
+
 터미널이나 셸 스크립트에서 MCP 없이 직접 브리지를 제어할 수 있다.
 
 ```sh
