@@ -71,6 +71,28 @@ func TestCoordinatorLeaseMCPDispatch(t *testing.T) {
 		t.Fatal("잘못된 action 은 오류여야 합니다")
 	}
 
+	// expected_term 누락·소수·잘못된 타입 거부
+	if _, err := d.CallTool(ctx, "a2a_coordinator_lease", map[string]any{
+		"action":   "renew",
+		"agent_id": "hermes",
+	}); err == nil {
+		t.Fatal("expected_term 누락 renew 는 오류여야 합니다")
+	}
+	if _, err := d.CallTool(ctx, "a2a_coordinator_lease", map[string]any{
+		"action":        "renew",
+		"agent_id":      "hermes",
+		"expected_term": float64(1.9),
+	}); err == nil {
+		t.Fatal("소수 expected_term(1.9) 은 거부돼야 합니다")
+	}
+	if _, err := d.CallTool(ctx, "a2a_coordinator_lease", map[string]any{
+		"action":        "claim",
+		"agent_id":      "codex",
+		"expected_term": "2",
+	}); err == nil {
+		t.Fatal("문자열 expected_term 은 거부돼야 합니다")
+	}
+
 	// renew/handoff 도 expected_term 을 검증해야 함
 	if _, err := d.CallTool(ctx, "a2a_coordinator_lease", map[string]any{
 		"action":        "renew",

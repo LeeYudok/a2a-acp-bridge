@@ -2,6 +2,7 @@ package dispatch
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -14,9 +15,9 @@ func (d *Dispatcher) callCoordinatorLease(args map[string]any) (any, error) {
 	if agentID == "" {
 		agentID = d.caller(args)
 	}
-	ttl := board.DefaultLeaseTTL
-	if sec := intArg(args, "ttl_seconds", 0); sec > 0 {
-		ttl = time.Duration(sec) * time.Second
+	ttl, err := parseLeaseTTL(args, action)
+	if err != nil {
+		return nil, err
 	}
 
 	switch action {
@@ -27,21 +28,33 @@ func (d *Dispatcher) callCoordinatorLease(args map[string]any) (any, error) {
 		}
 		return map[string]any{"coordinator": lease}, nil
 	case "claim":
+		expectedTerm, err := parseExpectedTerm(args)
+		if err != nil {
+			return nil, err
+		}
 		return d.Board.ClaimCoordinator(
 			agentID,
-			uint64Arg(args, "expected_term", 0),
+			expectedTerm,
 			ttl,
 			strArg(args, "reason", ""),
 			strSliceArg(args, "active_agents"),
 			boolArg(args, "force", false),
 		)
 	case "renew":
-		return d.Board.RenewCoordinator(agentID, uint64Arg(args, "expected_term", 0), ttl)
+		expectedTerm, err := parseExpectedTerm(args)
+		if err != nil {
+			return nil, err
+		}
+		return d.Board.RenewCoordinator(agentID, expectedTerm, ttl)
 	case "handoff":
+		expectedTerm, err := parseExpectedTerm(args)
+		if err != nil {
+			return nil, err
+		}
 		return d.Board.HandoffCoordinator(
 			agentID,
 			strArg(args, "to_agent", ""),
-			uint64Arg(args, "expected_term", 0),
+			expectedTerm,
 			strArg(args, "reason", ""),
 			ttl,
 		)
@@ -50,47 +63,69 @@ func (d *Dispatcher) callCoordinatorLease(args map[string]any) (any, error) {
 	}
 }
 
-func intArg(m map[string]any, k string, def int) int {
-	v, ok := m[k]
-	if !ok {
-		return def
+func parseExpectedTerm(args map[string]any) (uint64, error) {
+	raw, ok := args["expected_term"]
+	if !ok || raw == nil {
+		return 0, fmt.Errorf("a2a_coordinator_lease: expected_term 인자가 필요합니다")
 	}
-	switch n := v.(type) {
-	case int:
-		return n
-	case int64:
-		return int(n)
+	switch n := raw.(type) {
 	case uint64:
-		return int(n)
+		return n, nil
+	case int:
+		if n < 0 {
+			return 0, fmt.Errorf("a2a_coordinator_lease: expected_term 은 음이 아닌 정수여야 합니다: %d", n)
+		}
+		return uint64(n), nil
+	case int64:
+		if n < 0 {
+			return 0, fmt.Errorf("a2a_coordinator_lease: expected_term 은 음이 아닌 정수여야 합니다: %d", n)
+		}
+		return uint64(n), nil
 	case float64:
-		return int(n)
+		if math.IsNaN(n) || math.IsInf(n, 0) || n < 0 || math.Trunc(n) != n {
+			return 0, fmt.Errorf("a2a_coordinator_lease: expected_term 은 음이 아닌 정수여야 합니다: %v", n)
+		}
+		return uint64(n), nil
 	default:
-		return def
+		return 0, fmt.Errorf("a2a_coordinator_lease: expected_term 형식이 잘못되었습니다(%T)", raw)
 	}
 }
 
-func uint64Arg(m map[string]any, k string, def uint64) uint64 {
-	v, ok := m[k]
-	if !ok {
-		return def
+func parseLeaseTTL(args map[string]any, action string) (time.Duration, error) {
+	raw, ok := args["ttl_seconds"]
+	if !ok || raw == nil {
+		return board.DefaultLeaseTTL, nil
 	}
-	switch n := v.(type) {
-	case uint64:
-		return n
+	var sec int64
+	switch n := raw.(type) {
 	case int:
-		if n >= 0 {
-			return uint64(n)
-		}
+		sec = int64(n)
 	case int64:
-		if n >= 0 {
-			return uint64(n)
-		}
+		sec = n
+	case uint64:
+		sec = int64(n)
 	case float64:
-		if n >= 0 {
-			return uint64(n)
+		if math.IsNaN(n) || math.IsInf(n, 0) || math.Trunc(n) != n {
+			return 0, fmt.Errorf("a2a_coordinator_lease: ttl_seconds 는 정수여야 합니다: %v", n)
 		}
+		sec = int64(n)
+	default:
+		return 0, fmt.Errorf("a2a_coordinator_lease: ttl_seconds 형식이 잘못되었습니다(%T)", raw)
 	}
-	return def
+	if sec < 0 || (sec == 0 && (action == "claim" || action == "renew")) {
+		if sec == 0 && args["ttl_seconds"] != nil {
+			// CLI coord command may pass 0 for handoff; keep claim/renew default when 0 unless negative.
+			if sec < 0 {
+				return 0, fmt.Errorf("a2a_coordinator_lease: ttl_seconds 는 음수일 수 없습니다: %d", sec)
+			}
+			return board.DefaultLeaseTTL, nil
+		}
+		return 0, fmt.Errorf("a2a_coordinator_lease: ttl_seconds 는 양의 정수여야 합니다: %d", sec)
+	}
+	if sec == 0 {
+		return board.DefaultLeaseTTL, nil
+	}
+	return time.Duration(sec) * time.Second, nil
 }
 
 func strSliceArg(m map[string]any, k string) []string {

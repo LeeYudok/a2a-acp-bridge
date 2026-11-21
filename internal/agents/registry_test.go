@@ -20,6 +20,8 @@ func TestRegistry(t *testing.T) {
 		"Antigravity":      "agy",
 		"gemini-cli":       "agy",
 		"claude-code":      "claude",
+		"notcodex":         "",
+		"myclaudeclient":   "",
 		"curl":             "",
 	}
 	for name, want := range cases {

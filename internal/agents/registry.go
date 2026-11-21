@@ -133,7 +133,7 @@ func FromClientName(name string) string {
 		}
 	}
 	for _, h := range clientHints {
-		if strings.Contains(lower, h.hint) {
+		if matchesTokenBoundary(lower, h.hint) {
 			return h.id
 		}
 	}
