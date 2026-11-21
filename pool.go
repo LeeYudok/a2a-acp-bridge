@@ -40,6 +40,7 @@ type SessionControlResult struct {
 type acpWorker struct {
 	turnMu         sync.Mutex
 	writeMu        sync.Mutex
+	metaMu         sync.RWMutex
 	cmd            *exec.Cmd
 	stdin          io.WriteCloser
 	reader         *bufio.Scanner
@@ -85,11 +86,16 @@ func (p *SessionPool) resolveCommand() []string {
 
 // Prompt 는 상주 워커를 재사용하거나 새로 띄워 ACP 프롬프트 턴을 실행한다
 func (p *SessionPool) Prompt(ctx context.Context, cwd, promptText, sessionID string) (AgyDelegateResult, error) {
+	return p.PromptWithOptions(ctx, cwd, promptText, sessionID, "", "")
+}
+
+// PromptWithOptions 는 필요 시 모드·모델을 선적용한 뒤 상주 워커에서 프롬프트 턴을 실행한다
+func (p *SessionPool) PromptWithOptions(ctx context.Context, cwd, promptText, sessionID, mode, model string) (AgyDelegateResult, error) {
 	w, reused, err := p.acquireWorker(cwd, sessionID)
 	if err != nil {
 		return AgyDelegateResult{}, err
 	}
-	res, err := w.runPromptTurn(ctx, promptText, reused)
+	res, err := w.runPromptTurn(ctx, promptText, reused, mode, model)
 	if err == nil {
 		return res, nil
 	}
@@ -101,7 +107,7 @@ func (p *SessionPool) Prompt(ctx context.Context, cwd, promptText, sessionID str
 	if err2 != nil {
 		return AgyDelegateResult{}, err
 	}
-	return w2.runPromptTurn(ctx, promptText, false)
+	return w2.runPromptTurn(ctx, promptText, false, mode, model)
 }
 
 func (p *SessionPool) acquireWorker(cwd, sessionID string) (*acpWorker, bool, error) {
@@ -158,15 +164,7 @@ func (p *SessionPool) SetMode(cwd, sessionID, modeID string) error {
 	}
 	w.turnMu.Lock()
 	defer w.turnMu.Unlock()
-	reqID := int(w.nextReqID.Add(1))
-	_, _, _, err = w.sendRPC(reqID, "session/set_mode", map[string]any{
-		"sessionId": w.sessionID,
-		"modeId":    modeID,
-	}, false)
-	if err == nil {
-		w.mode = modeID
-	}
-	return err
+	return w.applyModeLocked(modeID)
 }
 
 // SetModel 은 ACP 세션의 모델 설정(session/set_config_option 또는 session/set_model)을 변경한다
@@ -177,23 +175,7 @@ func (p *SessionPool) SetModel(cwd, sessionID, modelID string) error {
 	}
 	w.turnMu.Lock()
 	defer w.turnMu.Unlock()
-	reqID := int(w.nextReqID.Add(1))
-	_, _, _, err = w.sendRPC(reqID, "session/set_config_option", map[string]any{
-		"sessionId": w.sessionID,
-		"configId":  "model",
-		"value":     modelID,
-	}, false)
-	if err != nil {
-		reqID2 := int(w.nextReqID.Add(1))
-		_, _, _, err = w.sendRPC(reqID2, "session/set_model", map[string]any{
-			"sessionId": w.sessionID,
-			"modelId":   modelID,
-		}, false)
-	}
-	if err == nil {
-		w.model = modelID
-	}
-	return err
+	return w.applyModelLocked(modelID)
 }
 
 // CloseSession 은 ACP session/close 를 호출하고 상주 워커 프로세스를 종료한다
@@ -242,14 +224,38 @@ func (p *SessionPool) Snapshots() []WorkerStatus {
 			SessionID:      w.sessionID,
 			PID:            pid,
 			Cwd:            w.cwd,
-			Mode:           w.mode,
-			Model:          w.model,
+			Mode:           w.getMode(),
+			Model:          w.getModel(),
 			ActivePrompt:   w.activePrompt.Load(),
 			SupportsResume: w.supportsResume,
 			TurnCount:      w.turnCount.Load(),
 		})
 	}
 	return out
+}
+
+func (w *acpWorker) getMode() string {
+	w.metaMu.RLock()
+	defer w.metaMu.RUnlock()
+	return w.mode
+}
+
+func (w *acpWorker) setModeValue(modeID string) {
+	w.metaMu.Lock()
+	w.mode = modeID
+	w.metaMu.Unlock()
+}
+
+func (w *acpWorker) getModel() string {
+	w.metaMu.RLock()
+	defer w.metaMu.RUnlock()
+	return w.model
+}
+
+func (w *acpWorker) setModelValue(modelID string) {
+	w.metaMu.Lock()
+	w.model = modelID
+	w.metaMu.Unlock()
 }
 
 func (w *acpWorker) isAlive() bool {

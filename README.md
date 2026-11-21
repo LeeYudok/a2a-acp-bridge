@@ -83,20 +83,25 @@ AI 코딩 에이전트 두 개(`agy`, `codex`)를 함께 쓸 때 프로세스를
 
 ## 3. 소스 파일 구조
 
-모든 파일은 단일 책임 원칙에 따라 300줄 이하로 유지한다. 함수당 인지 복잡도(CC)도 15 이하로 구성했다(2026-11-17 기준 총 2,374줄).
+모든 파일은 단일 책임 원칙에 따라 300줄 이하로 유지한다. 함수당 인지 복잡도(CC)도 15 이하로 구성했다(2026-11-22 기준 총 2,936줄).
 
 | 파일 | 줄 수 | 역할 |
 | :--- | :--- | :--- |
-| `main.go` | 206 | CLI 엔트리포인트 및 서브커맨드 플래그 파싱 |
-| `board.go` | 295 | 공유 보드(`Board`) 자료구조, 에이전트 카드, 태스크·메시지 원자적 파일 저장 |
-| `board_sessions.go` | 226 | 수신함 조회, 태스크 조회, 명명 세션(`NamedSession`) 생성·조회·종료 |
+| `main.go` | 249 | CLI 엔트리포인트, `-timeout`·`-cwd` 파싱 및 서브커맨드 라우팅 |
+| `board.go` | 268 | 공유 보드(`Board`) 자료구조, 에이전트 카드, 태스크·메시지 상태 갱신 |
+| `board_sessions.go` | 238 | 수신함 조회, 태스크 조회, 명명 세션(`NamedSession`) 생성·조회·종료 |
+| `board_store.go` | 95 | 파일 락 래퍼(`withLock`), 고유 임시파일(`os.CreateTemp`) 기반 원자적 저장 |
+| `board_lock_unix.go` | 35 | Unix `flock` 기반 보드 다중 프로세스 배타 락 |
+| `board_lock_other.go` | 7 | 비유닉스 환경 보드 파일 락 폴백 |
+| `agy_history.go` | 64 | `agy-sessions` 서브커맨드 및 `session/list` 페이지 조회 |
 | `clients.go` | 269 | ACP 스트림 파서, 역방향 권한 요청 자동 응답기, Codex JSONL 실행기 |
-| `pool.go` | 288 | 상주 ACP 워커 풀(`SessionPool`), 턴 취소(`Cancel`), 모드·모델 변경, 프로세스 정리 |
-| `pool_worker.go` | 248 | 개별 `acpWorker` 스폰, `initialize`·`session/resume`·`session/load`, 프롬프트 턴 실행 |
-| `server.go` | 255 | MCP 도구 스키마 정의(`MCPTools`), `Dispatcher` 라우팅, 비동기 큐(`asyncWG`) |
+| `pool.go` | 294 | 상주 ACP 워커 풀(`SessionPool`), `PromptWithOptions`, 턴 취소·모드·모델 제어 |
+| `pool_worker.go` | 295 | 개별 `acpWorker` 스폰, `session/set_mode`·`session/set_model` 선적용, 프롬프트 턴 실행 |
+| `server.go` | 249 | MCP 도구 스키마 정의(`MCPTools`), `Dispatcher` 라우팅, 비동기 큐(`asyncWG`) |
 | `server_transport.go` | 274 | Codex 위임 실행, `acp_session_control` 처리, MCP stdio JSON-RPC 서버 루프 |
 | `server_http.go` | 71 | Go 1.22+ `http.ServeMux` 기반 A2A HTTP 서버 (`/.well-known/agent.json`, `/a2a`) |
-| `bridge_test.go` | 242 | 모의 ACP 서버 기반 세션 풀 재사용·리플레이 억제·비동기 큐·MCP·HTTP 통합 테스트 |
+| `bridge_test.go` | 282 | 모의 ACP 서버 기반 세션 풀 재사용·리플레이 억제·비동기 큐·MCP·HTTP 통합 테스트 |
+| `bridge_improvements_test.go` | 246 | 다중 고루틴·멀티프로세스 보드 락, 모드·모델 선적용, CLI 플래그·`sync` intent 테스트 |
 
 ---
 
@@ -140,7 +145,7 @@ MCP stdio 스트림이 깨지지 않도록 `ssh -q -o LogLevel=ERROR` 옵션을 
 
 ## 5. MCP 도구 상세 명세
 
-MCP 서버(`a2a-acp-bridge mcp`)는 아래 7개 도구를 노출한다(2026-11-17 기준).
+MCP 서버(`a2a-acp-bridge mcp`)는 아래 7개 도구를 노출한다(2026-11-22 기준).
 
 | 도구 이름 | 언제 쓰나 | 필수 인자 | 선택 인자 |
 | :--- | :--- | :--- | :--- |
@@ -148,7 +153,7 @@ MCP 서버(`a2a-acp-bridge mcp`)는 아래 7개 도구를 노출한다(2026-11-1
 | `acp_delegate_to_agy` | AGY(`agy acp`)에게 코드 작성·분석·리팩터링을 맡길 때 | `prompt` | `session_name`, `session_id`, `mode`, `model`, `async`, `cwd` |
 | `a2a_delegate_to_codex` | Codex(`codex exec`)에게 교차 코드 리뷰나 비대화형 작업을 맡길 때 | `prompt` | `session_name`, `thread_id`, `sandbox`, `async`, `cwd` |
 | `acp_session_control` | 상주 세션 상태를 보거나 실행 중 취소·모드 변경·모델 변경·종료할 때 | `action` | `session`, `mode`, `model`, `cwd` |
-| `a2a_send_message` | 에이전트 직접 실행 없이 공유 보드에 메시지·태스크만 남길 때 | `from_agent`, `to_agent`, `content` | `intent`, `task_id` |
+| `a2a_send_message` | 에이전트 직접 실행 없이 공유 보드에 메시지·태스크만 남길 때 (`intent`: `delegate`/`review`/`reply`/`chat`/`sync`) | `from_agent`, `to_agent`, `content` | `intent`, `task_id` |
 | `a2a_receive_messages` | 특정 에이전트(`agy` 또는 `codex`) 앞으로 온 메시지를 읽을 때 | `agent_id` | `unread_only`, `mark_read` |
 | `a2a_task_status` | 특정 `task_id`의 진행 상태와 대화 내역을 조회하거나 상태를 바꿀 때 | 없음 | `task_id`, `state` |
 
@@ -183,8 +188,8 @@ MCP 서버(`a2a-acp-bridge mcp`)는 아래 7개 도구를 노출한다(2026-11-1
 
 - `status`: 현재 메모리에 살아있는 ACP 워커 목록(`pid`, `session_id`, `active_prompt`, `turn_count`)과 저장된 명명 세션 목록을 반환한다.
 - `cancel`: `session`에 지정한 이름 또는 세션 ID의 실행 중인 프롬프트 턴에 `session/cancel`을 보낸다.
-- `set_mode`: 세션 실행 모드를 `auto`, `accept-edits`, `plan` 중 하나로 바꾼다.
-- `set_model`: 세션 모델을 지정한 `model` ID로 바꾼다. `session/set_config_option`을 먼저 시도하고 실패하면 `session/set_model`로 폴백한다.
+- `set_mode`: 세션 실행 모드를 `auto`, `accept-edits`, `plan` 중 하나로 바꾼다. `acp_delegate_to_agy`에 `mode`를 주면 해당 턴 프롬프트 전송 전에 먼저 적용한다.
+- `set_model`: 세션 모델을 지정한 `model` ID로 바꾼다. `session/set_config_option`을 먼저 시도하고 실패하면 `session/set_model`로 폴백하며, `acp_delegate_to_agy`에 `model`을 주면 프롬프트 전송 전에 먼저 적용한다.
 - `close`: `session/close` RPC를 보내고 워커 프로세스를 종료한 뒤 명명 세션을 닫힘(`closed: true`)으로 표시한다.
 
 ---
@@ -196,8 +201,8 @@ MCP 서버(`a2a-acp-bridge mcp`)는 아래 7개 도구를 노출한다(2026-11-1
 AGY를 시작한 디렉터리에서 `agy-sessions`를 실행한다. ACP의 `session/list` 응답에서 `sessionId`, 작업 디렉터리, 제목, 갱신 시각을 확인할 수 있다. 응답에 `nextCursor`가 있으면 `agy-sessions -cursor <nextCursor>`로 다음 목록을 조회한다.
 
 ```sh
-a2a-acp-bridge agy-sessions
-a2a-acp-bridge ask-agy -session-id <sessionId> "진행 중인 작업과 검증 결과를 알려줘"
+a2a-acp-bridge agy-sessions -cwd /path/to/repo -timeout 3m
+a2a-acp-bridge ask-agy -session-id <sessionId> -timeout 5m "진행 중인 작업과 검증 결과를 알려줘"
 ```
 
 터미널이나 셸 스크립트에서 MCP 없이 직접 브리지를 제어할 수 있다.
@@ -206,14 +211,14 @@ a2a-acp-bridge ask-agy -session-id <sessionId> "진행 중인 작업과 검증 �
 # 1. 에이전트 카드, 활성 명명 세션, 최근 태스크 조회
 a2a-acp-bridge cards
 
-# 2. AGY에게 작업 위임 (-s 로 세션 이름 지정, -mode 로 모드 지정)
-a2a-acp-bridge ask-agy -s backend -mode auto "신규 엔드포인트 입력 검증 테스트 추가해줘"
+# 2. AGY에게 작업 위임 (-s 세션명, -mode 선적용 모드, -cwd/-timeout 지정)
+a2a-acp-bridge ask-agy -s backend -mode auto -cwd /path/to/repo -timeout 5m "신규 엔드포인트 입력 검증 테스트 추가해줘"
 
 # 3. AGY 비동기 큐 실행 (-no-wait 지정 시 즉시 task_id 반환)
 a2a-acp-bridge ask-agy -s backend -no-wait "전체 패키지 정적 분석 실행해줘"
 
 # 4. Codex에게 읽기 전용(read-only) 코드 리뷰 위임
-a2a-acp-bridge ask-codex -s review -sandbox read-only "최근 커밋의 에러 래핑 누락 여부 확인해줘"
+a2a-acp-bridge ask-codex -s review -sandbox read-only -cwd /path/to/repo -timeout 5m "최근 커밋의 에러 래핑 누락 여부 확인해줘"
 
 # 5. 세션 상태 조회 및 런타임 제어
 a2a-acp-bridge sessions
@@ -222,8 +227,8 @@ a2a-acp-bridge set-model -s backend -model gemini-2.5-pro
 a2a-acp-bridge cancel -s backend
 a2a-acp-bridge close -s backend
 
-# 6. 공유 보드 메시지 송신 및 수신함 확인
-a2a-acp-bridge send -from agy -to codex -intent review "설계안 검토 요청"
+# 6. 공유 보드 메시지 송신(delegate|review|reply|chat|sync) 및 수신함 확인
+a2a-acp-bridge send -from agy -to codex -intent sync "머지 및 로컬 서버 기동 동기화"
 a2a-acp-bridge inbox codex
 a2a-acp-bridge inbox -all agy
 
@@ -270,4 +275,4 @@ curl -s http://127.0.0.1:8765/a2a \
 | `A2A_ACP_COMMAND` | `agy acp --dangerously-skip-permissions` | ACP 워커가 실행할 명령어와 인자 재정의 |
 | `A2A_CODEX_COMMAND` | `codex` | Codex 위임 시 실행할 바이너리 명령 재정의 |
 
-보드 저장소(`a2a_board.json`)는 동시 쓰기 시 파일이 깨지지 않게 보호한다. 같은 디렉터리에 `.tmp` 임시 파일을 권한 `0600`으로 쓴 뒤 `os.Rename`으로 원자적 교체한다.
+보드 저장소(`a2a_board.json`)는 프로세스 내부 뮤텍스와 Unix OS 파일 락(`a2a_board.json.lock`, `flock`)으로 다중 프로세스 동시 쓰기를 직렬화한다. 같은 디렉터리에 `os.CreateTemp`로 고유 임시 파일을 만들고 권한 `0600`으로 쓴 뒤 `os.Rename`으로 원자적 교체한다.

@@ -137,10 +137,13 @@ func parseSessionID(raw json.RawMessage, fallback string, strict bool) (string, 
 	return "", fmt.Errorf("ACP sessionId 파싱 실패: %s", string(raw))
 }
 
-func (w *acpWorker) runPromptTurn(ctx context.Context, promptText string, reused bool) (AgyDelegateResult, error) {
+func (w *acpWorker) runPromptTurn(ctx context.Context, promptText string, reused bool, mode, model string) (AgyDelegateResult, error) {
 	w.turnMu.Lock()
 	defer w.turnMu.Unlock()
 
+	if err := w.applyTurnOptionsLocked(mode, model); err != nil {
+		return AgyDelegateResult{}, err
+	}
 	w.activePrompt.Store(true)
 	w.cancelling.Store(false)
 	turnDone := make(chan struct{})
@@ -253,4 +256,40 @@ func (w *acpWorker) replyIfAgentRequest(env jsonRPCEnvelope) bool {
 	w.writeMu.Lock()
 	defer w.writeMu.Unlock()
 	return handleAgentToClientRPC(w.stdin, env, w.cancelling.Load())
+}
+
+func (w *acpWorker) applyTurnOptionsLocked(mode, model string) error {
+	if mode != "" && w.getMode() != mode {
+		if err := w.applyModeLocked(mode); err != nil {
+			return fmt.Errorf("ACP 실행 모드(%s) 적용 실패: %w", mode, err)
+		}
+	}
+	if model != "" && w.getModel() != model {
+		if err := w.applyModelLocked(model); err != nil {
+			return fmt.Errorf("ACP 모델(%s) 적용 실패: %w", model, err)
+		}
+	}
+	return nil
+}
+
+func (w *acpWorker) applyModeLocked(modeID string) error {
+	reqID := int(w.nextReqID.Add(1))
+	_, _, _, err := w.sendRPC(reqID, "session/set_mode", map[string]any{"sessionId": w.sessionID, "modeId": modeID}, false)
+	if err == nil {
+		w.setModeValue(modeID)
+	}
+	return err
+}
+
+func (w *acpWorker) applyModelLocked(modelID string) error {
+	reqID := int(w.nextReqID.Add(1))
+	_, _, _, err := w.sendRPC(reqID, "session/set_config_option", map[string]any{"sessionId": w.sessionID, "configId": "model", "value": modelID}, false)
+	if err != nil {
+		reqID2 := int(w.nextReqID.Add(1))
+		_, _, _, err = w.sendRPC(reqID2, "session/set_model", map[string]any{"sessionId": w.sessionID, "modelId": modelID}, false)
+	}
+	if err == nil {
+		w.setModelValue(modelID)
+	}
+	return err
 }

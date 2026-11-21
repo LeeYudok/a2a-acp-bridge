@@ -1,15 +1,11 @@
 package main
 
 import (
-	"crypto/rand"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
-	"time"
 )
 
 // ErrTaskNotFound 는 요청한 task_id 가 보드에 없을 때 반환한다
@@ -181,55 +177,8 @@ func AgentCards(workspace string, sessions []NamedSession, recent []Task) Discov
 	}
 }
 
-func newID(prefix string) (string, error) {
-	buf := make([]byte, 5)
-	if _, err := rand.Read(buf); err != nil {
-		return "", fmt.Errorf("난수 ID 생성 실패: %w", err)
-	}
-	return prefix + "-" + hex.EncodeToString(buf), nil
-}
-
-func nowSeconds() float64 { return float64(time.Now().UnixNano()) / 1e9 }
-
-func (b *Board) load() (boardState, error) {
-	st := boardState{Tasks: []Task{}, Messages: []Message{}, Sessions: []NamedSession{}}
-	raw, err := os.ReadFile(b.path)
-	if errors.Is(err, os.ErrNotExist) || len(raw) == 0 {
-		return st, nil
-	}
-	if err != nil {
-		return st, fmt.Errorf("보드 파일 읽기 실패: %w", err)
-	}
-	if err := json.Unmarshal(raw, &st); err != nil {
-		return st, fmt.Errorf("보드 JSON 파싱 실패: %w", err)
-	}
-	return normalizeBoardState(st), nil
-}
-
-func (b *Board) save(st boardState) error {
-	if err := os.MkdirAll(filepath.Dir(b.path), 0o755); err != nil {
-		return fmt.Errorf("보드 디렉터리 생성 실패: %w", err)
-	}
-	raw, err := json.MarshalIndent(st, "", "  ")
-	if err != nil {
-		return fmt.Errorf("보드 직렬화 실패: %w", err)
-	}
-	tmp := b.path + ".tmp"
-	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
-		return fmt.Errorf("임시 보드 파일 쓰기 실패: %w", err)
-	}
-	return os.Rename(tmp, b.path)
-}
-
-// UpsertTask 는 태스크를 생성하거나 상태를 갱신한다
-func (b *Board) UpsertTask(creator, assignee, title, state, taskID, sessionRef string) (Task, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	st, err := b.load()
-	if err != nil {
-		return Task{}, err
-	}
-	now := nowSeconds()
+func upsertTaskInState(st *boardState, creator, assignee, title, state, taskID, sessionRef string, now float64) (Task, error) {
+	var err error
 	if taskID == "" {
 		if taskID, err = newID("task"); err != nil {
 			return Task{}, err
@@ -246,7 +195,7 @@ func (b *Board) UpsertTask(creator, assignee, title, state, taskID, sessionRef s
 			st.Tasks[i].SessionRef = sessionRef
 		}
 		st.Tasks[i].UpdatedAt = now
-		return attachMessages(st.Tasks[i], st.Messages), b.save(st)
+		return attachMessages(st.Tasks[i], st.Messages), nil
 	}
 	if title == "" {
 		title = taskID
@@ -260,7 +209,28 @@ func (b *Board) UpsertTask(creator, assignee, title, state, taskID, sessionRef s
 		Artifacts: []Artifact{}, CreatedAt: now, UpdatedAt: now,
 	}
 	st.Tasks = append(st.Tasks, created)
-	return attachMessages(created, st.Messages), b.save(st)
+	return attachMessages(created, st.Messages), nil
+}
+
+// UpsertTask 는 태스크를 생성하거나 상태를 갱신한다
+func (b *Board) UpsertTask(creator, assignee, title, state, taskID, sessionRef string) (Task, error) {
+	var out Task
+	err := b.withLock(func() error {
+		st, err := b.load()
+		if err != nil {
+			return err
+		}
+		t, err := upsertTaskInState(&st, creator, assignee, title, state, taskID, sessionRef, nowSeconds())
+		if err != nil {
+			return err
+		}
+		if err := b.save(st); err != nil {
+			return err
+		}
+		out = t
+		return nil
+	})
+	return out, err
 }
 
 // SendMessage 는 공유 보드에 새 메시지를 기록하고 관련 태스크를 함께 갱신한다
@@ -269,27 +239,30 @@ func (b *Board) SendMessage(fromAgent, toAgent, content, intent, taskID string) 
 	if intent == "reply" {
 		state = "working"
 	}
-	t, err := b.UpsertTask(fromAgent, toAgent, content, state, taskID, "")
-	if err != nil {
-		return Message{}, err
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	st, err := b.load()
-	if err != nil {
-		return Message{}, err
-	}
-	mid, err := newID("msg")
-	if err != nil {
-		return Message{}, err
-	}
 	if intent == "" {
 		intent = "delegate"
 	}
-	msg := Message{
-		MessageID: mid, TaskID: t.TaskID, FromAgent: fromAgent,
-		ToAgent: toAgent, Intent: intent, Content: content, CreatedAt: nowSeconds(),
-	}
-	st.Messages = append(st.Messages, msg)
-	return msg, b.save(st)
+	var msg Message
+	err := b.withLock(func() error {
+		st, err := b.load()
+		if err != nil {
+			return err
+		}
+		now := nowSeconds()
+		t, err := upsertTaskInState(&st, fromAgent, toAgent, content, state, taskID, "", now)
+		if err != nil {
+			return err
+		}
+		mid, err := newID("msg")
+		if err != nil {
+			return err
+		}
+		msg = Message{
+			MessageID: mid, TaskID: t.TaskID, FromAgent: fromAgent,
+			ToAgent: toAgent, Intent: intent, Content: content, CreatedAt: now,
+		}
+		st.Messages = append(st.Messages, msg)
+		return b.save(st)
+	})
+	return msg, err
 }

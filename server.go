@@ -94,7 +94,7 @@ func MCPTools() []ToolSchema {
 					"from_agent": map[string]any{"type": "string", "enum": []string{"agy", "codex", "user"}},
 					"to_agent":   map[string]any{"type": "string", "enum": []string{"agy", "codex"}},
 					"content":    map[string]any{"type": "string", "description": "전달할 메시지 본문"},
-					"intent":     map[string]any{"type": "string", "enum": []string{"delegate", "review", "reply", "chat"}},
+					"intent":     map[string]any{"type": "string", "enum": []string{"delegate", "review", "reply", "chat", "sync"}},
 					"task_id":    map[string]any{"type": "string", "description": "연결할 태스크 ID (선택)"},
 				},
 				"required": []string{"from_agent", "to_agent", "content"},
@@ -233,16 +233,10 @@ func (d *Dispatcher) callDelegateAgy(ctx context.Context, args map[string]any) (
 }
 
 func (d *Dispatcher) executeAgyTurn(ctx context.Context, cwd, prompt, sid, sessionName, mode, model, taskID string) (AgyDelegateResult, error) {
-	res, err := d.pool().Prompt(ctx, cwd, prompt, sid)
+	res, err := d.pool().PromptWithOptions(ctx, cwd, prompt, sid, mode, model)
 	if err != nil {
 		_, _ = d.Board.UpsertTask("codex", "agy", prompt, "failed", taskID, sid)
 		return AgyDelegateResult{}, err
-	}
-	if mode != "" {
-		_ = d.pool().SetMode(cwd, res.SessionID, mode)
-	}
-	if model != "" {
-		_ = d.pool().SetModel(cwd, res.SessionID, model)
 	}
 	if sessionName != "" {
 		_, _ = d.Board.UpsertSession(sessionName, "agy", res.SessionID, cwd, mode, model)
