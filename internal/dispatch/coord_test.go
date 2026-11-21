@@ -71,6 +71,23 @@ func TestCoordinatorLeaseMCPDispatch(t *testing.T) {
 		t.Fatal("잘못된 action 은 오류여야 합니다")
 	}
 
+	// renew/handoff 도 expected_term 을 검증해야 함
+	if _, err := d.CallTool(ctx, "a2a_coordinator_lease", map[string]any{
+		"action":        "renew",
+		"agent_id":      "hermes",
+		"expected_term": float64(1),
+	}); !errors.Is(err, board.ErrTermMismatch) {
+		t.Fatalf("구버전 expected_term renew 는 ErrTermMismatch 여야 합니다: %v", err)
+	}
+	if _, err := d.CallTool(ctx, "a2a_coordinator_lease", map[string]any{
+		"action":        "renew",
+		"agent_id":      "hermes",
+		"expected_term": float64(2),
+		"ttl_seconds":   float64(900),
+	}); err != nil {
+		t.Fatalf("정상 expected_term renew 실패: %v", err)
+	}
+
 	// CAS 불일치 확인
 	if _, err := d.CallTool(ctx, "a2a_coordinator_lease", map[string]any{
 		"action":        "claim",

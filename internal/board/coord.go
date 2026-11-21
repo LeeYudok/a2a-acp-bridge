@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -15,8 +16,14 @@ var (
 	ErrTermMismatch = errors.New("지휘권 임기 번호(expected_term) 불일치")
 	// ErrLeaseActive 는 활성 리스가 아직 유효해 force 없이 승계할 수 없을 때 반환한다
 	ErrLeaseActive = errors.New("현재 지휘자의 리스가 아직 만료되지 않음")
+	// ErrLeaseExpired 는 만료된 리스를 renew·handoff 하려 할 때 반환한다
+	ErrLeaseExpired = errors.New("만료된 지휘권 리스는 갱신·이양할 수 없음 (claim 필요)")
+	// ErrLeaseHandedOff 는 개방 이양된 리스를 다시 renew·handoff 하려 할 때 반환한다
+	ErrLeaseHandedOff = errors.New("개방 이양 상태의 리스는 갱신·재이양할 수 없음")
 	// ErrNotCoordinator 는 현재 지휘자가 아닌 에이전트가 갱신/이양을 시도할 때 반환한다
 	ErrNotCoordinator = errors.New("현재 지휘자만 리스를 갱신·이양할 수 있음")
+	// ErrReasonRequired 는 활성 리스를 force 로 강제 승계할 때 사유가 비어 있으면 반환한다
+	ErrReasonRequired = errors.New("활성 리스의 강제 승계(force)에는 사유(reason)가 필요함")
 	// ErrInvalidAgentID 는 에이전트 ID가 소문자 slug 규격에 맞지 않을 때 반환한다
 	ErrInvalidAgentID = errors.New("에이전트 ID는 ^[a-z0-9][a-z0-9-]{0,23}$ 형식이어야 함")
 )
@@ -52,7 +59,7 @@ func (b *Board) GetCoordinator() (*CoordinatorLease, error) {
 }
 
 // ClaimCoordinator 는 expectedTerm CAS 를 확인한 뒤 agentID 에게 새 지휘권 리스(term+1)를 부여한다.
-// 활성 리스가 남아 있으면 만료·이양 상태거나 force=true 인 경우에만 승계를 허용한다.
+// 활성 리스가 남아 있으면 만료·이양 상태거나 force=true(사유 필수)인 경우에만 승계를 허용한다.
 func (b *Board) ClaimCoordinator(agentID string, expectedTerm uint64, ttl time.Duration, reason string, activeAgents []string, force bool) (CoordinatorLease, error) {
 	if !isValidSlug(agentID) {
 		return CoordinatorLease{}, fmt.Errorf("%q: %w", agentID, ErrInvalidAgentID)
@@ -72,7 +79,7 @@ func (b *Board) ClaimCoordinator(agentID string, expectedTerm uint64, ttl time.D
 		if cur := st.Coordinator; cur != nil {
 			curTerm = cur.Term
 			prevLeader = cur.Leader
-			if err := canTakeover(cur, agentID, expectedTerm, now, force); err != nil {
+			if err := canTakeover(cur, agentID, expectedTerm, now, reason, force); err != nil {
 				return err
 			}
 		} else if expectedTerm != 0 {
@@ -84,7 +91,7 @@ func (b *Board) ClaimCoordinator(agentID string, expectedTerm uint64, ttl time.D
 			LeaseUntil:     now + ttl.Seconds(),
 			UpdatedAt:      now,
 			PreviousLeader: prevLeader,
-			Reason:         reason,
+			Reason:         strings.TrimSpace(reason),
 			ActiveAgents:   cleanAgents(activeAgents, agentID),
 		}
 		st.Coordinator = &next
@@ -97,8 +104,8 @@ func (b *Board) ClaimCoordinator(agentID string, expectedTerm uint64, ttl time.D
 	return out, err
 }
 
-// RenewCoordinator 는 현 지휘자가 동일 term 으로 자신의 리스 만료 시각을 연장한다.
-func (b *Board) RenewCoordinator(agentID string, ttl time.Duration) (CoordinatorLease, error) {
+// RenewCoordinator 는 현 지휘자가 동일 term 으로 자신의 유효한 리스 만료 시각을 연장한다.
+func (b *Board) RenewCoordinator(agentID string, expectedTerm uint64, ttl time.Duration) (CoordinatorLease, error) {
 	if !isValidSlug(agentID) {
 		return CoordinatorLease{}, fmt.Errorf("%q: %w", agentID, ErrInvalidAgentID)
 	}
@@ -111,13 +118,12 @@ func (b *Board) RenewCoordinator(agentID string, ttl time.Duration) (Coordinator
 		if err != nil {
 			return err
 		}
-		if st.Coordinator == nil || st.Coordinator.Leader != agentID {
-			return fmt.Errorf("요청=%s: %w", agentID, ErrNotCoordinator)
-		}
 		now := nowSeconds()
+		if err := validateLeaderCAS(st.Coordinator, agentID, expectedTerm, now); err != nil {
+			return err
+		}
 		st.Coordinator.LeaseUntil = now + ttl.Seconds()
 		st.Coordinator.UpdatedAt = now
-		st.Coordinator.HandedOffTo = ""
 		if err := b.save(st); err != nil {
 			return err
 		}
@@ -127,9 +133,9 @@ func (b *Board) RenewCoordinator(agentID string, ttl time.Duration) (Coordinator
 	return out, err
 }
 
-// HandoffCoordinator 는 현 지휘자가 정상 이양한다.
+// HandoffCoordinator 는 현 지휘자가 유효한 리스를 정상 이양한다.
 // toAgent 가 지정되면 즉시 해당 에이전트로 term+1 리스를 넘기고, 비어 있으면 개방 이양("*")으로 만료시킨다.
-func (b *Board) HandoffCoordinator(fromAgent, toAgent, reason string, ttl time.Duration) (CoordinatorLease, error) {
+func (b *Board) HandoffCoordinator(fromAgent, toAgent string, expectedTerm uint64, reason string, ttl time.Duration) (CoordinatorLease, error) {
 	if !isValidSlug(fromAgent) {
 		return CoordinatorLease{}, fmt.Errorf("%q: %w", fromAgent, ErrInvalidAgentID)
 	}
@@ -145,11 +151,11 @@ func (b *Board) HandoffCoordinator(fromAgent, toAgent, reason string, ttl time.D
 		if err != nil {
 			return err
 		}
-		cur := st.Coordinator
-		if cur == nil || cur.Leader != fromAgent {
-			return fmt.Errorf("요청=%s: %w", fromAgent, ErrNotCoordinator)
-		}
 		now := nowSeconds()
+		if err := validateLeaderCAS(st.Coordinator, fromAgent, expectedTerm, now); err != nil {
+			return err
+		}
+		cur := st.Coordinator
 		var next CoordinatorLease
 		if toAgent != "" {
 			next = CoordinatorLease{
@@ -158,7 +164,7 @@ func (b *Board) HandoffCoordinator(fromAgent, toAgent, reason string, ttl time.D
 				LeaseUntil:     now + ttl.Seconds(),
 				UpdatedAt:      now,
 				PreviousLeader: fromAgent,
-				Reason:         reason,
+				Reason:         strings.TrimSpace(reason),
 				ActiveAgents:   cleanAgents(cur.ActiveAgents, toAgent),
 			}
 		} else {
@@ -168,7 +174,7 @@ func (b *Board) HandoffCoordinator(fromAgent, toAgent, reason string, ttl time.D
 				LeaseUntil:     0,
 				UpdatedAt:      now,
 				PreviousLeader: cur.PreviousLeader,
-				Reason:         reason,
+				Reason:         strings.TrimSpace(reason),
 				ActiveAgents:   slices.Clone(cur.ActiveAgents),
 				HandedOffTo:    "*",
 			}
@@ -183,14 +189,36 @@ func (b *Board) HandoffCoordinator(fromAgent, toAgent, reason string, ttl time.D
 	return out, err
 }
 
-func canTakeover(cur *CoordinatorLease, agentID string, expectedTerm uint64, now float64, force bool) error {
+func validateLeaderCAS(cur *CoordinatorLease, agentID string, expectedTerm uint64, now float64) error {
+	if cur == nil || cur.Leader != agentID {
+		return fmt.Errorf("요청=%s: %w", agentID, ErrNotCoordinator)
+	}
 	if cur.Term != expectedTerm {
 		return fmt.Errorf("현재=%d, 요청=%d: %w", cur.Term, expectedTerm, ErrTermMismatch)
 	}
-	if force || cur.Leader == agentID || cur.HandedOffTo == "*" || cur.HandedOffTo == agentID || now >= cur.LeaseUntil {
+	if cur.HandedOffTo != "" {
+		return fmt.Errorf("leader=%s, term=%d: %w", cur.Leader, cur.Term, ErrLeaseHandedOff)
+	}
+	if now >= cur.LeaseUntil {
+		return fmt.Errorf("leader=%s, term=%d: %w", cur.Leader, cur.Term, ErrLeaseExpired)
+	}
+	return nil
+}
+
+func canTakeover(cur *CoordinatorLease, agentID string, expectedTerm uint64, now float64, reason string, force bool) error {
+	if cur.Term != expectedTerm {
+		return fmt.Errorf("현재=%d, 요청=%d: %w", cur.Term, expectedTerm, ErrTermMismatch)
+	}
+	if cur.Leader == agentID || cur.HandedOffTo == "*" || cur.HandedOffTo == agentID || now >= cur.LeaseUntil {
 		return nil
 	}
-	return fmt.Errorf("leader=%s, term=%d: %w", cur.Leader, cur.Term, ErrLeaseActive)
+	if !force {
+		return fmt.Errorf("leader=%s, term=%d: %w", cur.Leader, cur.Term, ErrLeaseActive)
+	}
+	if strings.TrimSpace(reason) == "" {
+		return fmt.Errorf("leader=%s, term=%d: %w", cur.Leader, cur.Term, ErrReasonRequired)
+	}
+	return nil
 }
 
 func cleanAgents(agents []string, include string) []string {

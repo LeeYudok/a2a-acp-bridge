@@ -82,10 +82,10 @@ func TestInboxPeekAndCoordCLI(t *testing.T) {
 	if err := runCoordCmd(ctx, d, []string{"claim", "-agent", "agy", "-expected-term", "0", "-ttl", "30m", "-reason", "초기"}); err != nil {
 		t.Fatalf("coord claim 실패: %v", err)
 	}
-	if err := runCoordCmd(ctx, d, []string{"renew", "-agent", "agy", "-ttl", "45m"}); err != nil {
+	if err := runCoordCmd(ctx, d, []string{"renew", "-agent", "agy", "-expected-term", "1", "-ttl", "45m"}); err != nil {
 		t.Fatalf("coord renew 실패: %v", err)
 	}
-	if err := runCoordCmd(ctx, d, []string{"handoff", "-agent", "agy", "-to", "hermes", "-reason", "이양"}); err != nil {
+	if err := runCoordCmd(ctx, d, []string{"handoff", "-agent", "agy", "-to", "hermes", "-expected-term", "1", "-reason", "이양"}); err != nil {
 		t.Fatalf("coord handoff 실패: %v", err)
 	}
 	cur, err := b.GetCoordinator()

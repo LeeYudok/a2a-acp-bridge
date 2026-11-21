@@ -119,18 +119,54 @@ var clientHints = []struct{ hint, id string }{
 	{"claude", "claude"},
 }
 
-// FromClientName 은 MCP 클라이언트 이름으로 에이전트 ID 를 추정한다. 모르면 빈 문자열이다.
+// FromClientName 은 MCP 클라이언트 이름으로 에이전트 ID 를 추정한다.
+// 정확 일치를 우선 확인하고, 동적 에이전트 ID 는 단어 경계를 기준으로 매칭한다.
 func FromClientName(name string) string {
-	lower := strings.ToLower(name)
+	lower := strings.ToLower(strings.TrimSpace(name))
+	if lower == "" {
+		return ""
+	}
+	ids := IDs()
+	for _, id := range ids {
+		if lower == id {
+			return id
+		}
+	}
 	for _, h := range clientHints {
 		if strings.Contains(lower, h.hint) {
 			return h.id
 		}
 	}
-	for _, id := range IDs() {
-		if strings.Contains(lower, id) {
+	for _, id := range ids {
+		if matchesTokenBoundary(lower, id) {
 			return id
 		}
 	}
 	return ""
+}
+
+func matchesTokenBoundary(haystack, needle string) bool {
+	if needle == "" || len(needle) > len(haystack) {
+		return false
+	}
+	offset := 0
+	for offset <= len(haystack)-len(needle) {
+		idx := strings.Index(haystack[offset:], needle)
+		if idx < 0 {
+			return false
+		}
+		start := offset + idx
+		end := start + len(needle)
+		leftOK := start == 0 || !isAlphaNum(haystack[start-1])
+		rightOK := end == len(haystack) || !isAlphaNum(haystack[end])
+		if leftOK && rightOK {
+			return true
+		}
+		offset = start + 1
+	}
+	return false
+}
+
+func isAlphaNum(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= '0' && b <= '9')
 }

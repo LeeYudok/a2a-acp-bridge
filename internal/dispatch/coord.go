@@ -36,11 +36,12 @@ func (d *Dispatcher) callCoordinatorLease(args map[string]any) (any, error) {
 			boolArg(args, "force", false),
 		)
 	case "renew":
-		return d.Board.RenewCoordinator(agentID, ttl)
+		return d.Board.RenewCoordinator(agentID, uint64Arg(args, "expected_term", 0), ttl)
 	case "handoff":
 		return d.Board.HandoffCoordinator(
 			agentID,
 			strArg(args, "to_agent", ""),
+			uint64Arg(args, "expected_term", 0),
 			strArg(args, "reason", ""),
 			ttl,
 		)

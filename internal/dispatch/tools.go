@@ -49,14 +49,14 @@ func Tools() []ToolSchema {
 		},
 		{
 			Name:        "a2a_coordinator_lease",
-			Description: "N-에이전트 오케스트레이터 지휘권 리스(status | claim | renew | handoff)를 원자적으로 조회·선점·갱신·이양합니다.",
+			Description: "N-에이전트 오케스트레이터 지휘권 리스(status | claim | renew | handoff)를 expected_term CAS 기반으로 원자 조회·선점·갱신·이양합니다. 활성 리스의 force 승계 시 reason 이 필요합니다.",
 			InputSchema: objectSchema(map[string]any{
 				"action":        enumProp([]string{"status", "claim", "renew", "handoff"}),
 				"agent_id":      strProp("실행 주체 에이전트 slug (생략 시 호출자 ID)"),
 				"to_agent":      strProp("이양 대상 에이전트 slug (handoff 전용, 생략 시 개방 이양 *)"),
-				"expected_term": map[string]any{"type": "integer", "description": "CAS 검증용 현재 term 번호"},
+				"expected_term": map[string]any{"type": "integer", "description": "CAS 검증용 현재 term 번호 (claim/renew/handoff 모두 필수)"},
 				"ttl_seconds":   map[string]any{"type": "integer", "description": "리스 유효 시간(초, 기본 3600)"},
-				"reason":        strProp("선점·페일오버·이양 사유"),
+				"reason":        strProp("선점·페일오버·이양 사유 (활성 리스 force 시 필수)"),
 				"active_agents": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "현재 활성 에이전트 풀"},
 				"force":         map[string]any{"type": "boolean", "description": "만료 전 장애 페일오버 강제 승계 허용"},
 			}, "action"),
