@@ -325,7 +325,7 @@ a2a-acp-bridge ask-agy -s backend -no-wait "전체 패키지 정적 분석 실�
 # 4. Codex에게 읽기 전용(read-only) 코드 리뷰 위임
 a2a-acp-bridge ask-codex -s review -sandbox read-only -cwd /path/to/repo -timeout 5m "최근 커밋의 에러 래핑 누락 여부 확인해줘"
 
-# 4-1. 다른 CODEX_HOME의 Codex 스레드에 위임 (재개는 기존 스레드 샌드박스 설정을 따름)
+# 4-1. 다른 CODEX_HOME의 Codex 스레드에 위임 (재개 기본 샌드박스: read-only)
 THREAD_ID=01234567-89ab-cdef-0123-456789abcdef
 A2A_CODEX_HOME=/Users/me/.codex A2A_AGENT_ID=codex a2a-acp-bridge ask-codex -thread-id "$THREAD_ID" -cwd /path/to/repo -timeout 5m "현재 작업 상태를 알려줘"
 
@@ -356,7 +356,12 @@ a2a-acp-bridge inbox claude
 # 발신자를 밝히지 않으면 user 수신함으로 돌아온다
 a2a-acp-bridge inbox user
 
-# 10. A2A HTTP 서버 기동
+# 10. 공유 보드 폴링 감시 (새 메시지·읽음·태스크 상태 변화를 JSON 이벤트로 출력)
+a2a-acp-bridge watch
+a2a-acp-bridge watch -agent codex -interval 2s -timeout 5m
+a2a-acp-bridge watch -all
+
+# 11. A2A HTTP 서버 기동
 a2a-acp-bridge serve-a2a -addr 127.0.0.1:8765
 ```
 
@@ -373,9 +378,10 @@ a2a-acp-bridge serve-a2a -addr 127.0.0.1:8765
 | `sessions`·`cancel`·`set-mode`·`set-model`·`close` | `-s`(또는 첫 위치 인자), `-mode`, `-model`, `-cwd`, `-timeout` |
 | `send` | `-from`, `-to`(기본 `codex`), `-intent`(기본 `delegate`), `-task-id` |
 | `inbox` | `-all`(읽은 메시지 포함), 위치 인자로 `agy`·`codex`·`claude`·`user` |
+| `watch` | `-agent`(기본 `A2A_AGENT_ID` 또는 `user`), `-interval`(기본 `1s`), `-all`, `-timeout`(기본 `0`, 종료 시그널까지) |
 | `serve-a2a` | `-addr`(기본 `127.0.0.1:8765`) |
 
-`-from`의 값은 `agy`, `codex`, `claude`, `user` 중 하나다. 없으면 `A2A_AGENT_ID`, 그것도 없으면 `user`로 기록한다. `-no-wait`는 결과 JSON을 즉시 출력하지만, CLI 프로세스는 백그라운드 작업이 끝날 때까지 종료하지 않는다. 백그라운드 작업에도 `-timeout` 이 적용된다(MCP 서버의 async 작업은 상한 없음). `-cwd` 를 주지 않고 `-s` 로 명명 세션을 이어가면 그 세션을 만든 디렉터리에서 실행한다. Claude Code·ACP 세션은 프로젝트 디렉터리에 묶여 있어 다른 디렉터리에서는 이어지지 않기 때문이다. `inbox`는 조회한 메시지를 읽음 처리한다(`-all`을 줘도 같다).
+`-from`의 값은 `agy`, `codex`, `claude`, `user` 중 하나다. 없으면 `A2A_AGENT_ID`, 그것도 없으면 `user`로 기록한다. `-no-wait`는 결과 JSON을 즉시 출력하지만, CLI 프로세스는 백그라운드 작업이 끝날 때까지 종료하지 않는다. 백그라운드 작업에도 `-timeout` 이 적용된다(MCP 서버의 async 작업은 상한 없음). `-cwd` 를 주지 않고 `-s` 로 명명 세션을 이어가면 그 세션을 만든 디렉터리에서 실행한다. Claude Code·ACP 세션은 프로젝트 디렉터리에 묶여 있어 다른 디렉터리에서는 이어지지 않기 때문이다. `inbox`는 조회한 메시지를 읽음 처리한다(`-all`을 줘도 같다). `watch`는 보드를 폴링해서 관련 에이전트(또는 `-all`)의 새 메시지(`type: message`, `op: new`), 읽음(`op: read`), 태스크 상태 변화(`type: task`)를 JSON 이벤트 한 줄씩 출력하고, 저장소를 바꾸지 않는다.
 
 ---
 
