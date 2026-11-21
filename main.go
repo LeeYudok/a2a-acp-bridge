@@ -18,7 +18,7 @@ func main() {
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("서브커맨드가 필요합니다 (mcp | serve-a2a | cards | ask-agy | ask-codex | sessions | cancel | set-mode | set-model | close | send | inbox)")
+		return fmt.Errorf("서브커맨드가 필요합니다 (mcp | serve-a2a | cards | ask-agy | agy-sessions | ask-codex | sessions | cancel | set-mode | set-model | close | send | inbox)")
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -55,6 +55,8 @@ func dispatchSubcommand(ctx context.Context, d *Dispatcher, cwd, sub string, res
 		return printResult(res, err)
 	case "ask-agy":
 		return runAskAgyCmd(ctx, d, cwd, rest)
+	case "agy-sessions":
+		return runAgySessionsCmd(ctx, d.pool(), cwd, rest)
 	case "ask-codex":
 		return runAskCodexCmd(ctx, d, cwd, rest)
 	case "sessions", "status", "cancel", "set-mode", "set-model", "close":

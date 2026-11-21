@@ -35,7 +35,23 @@ func handleMockACPLine(sc *bufio.Scanner, env jsonRPCEnvelope) {
 	case "initialize":
 		fmt.Printf(`{"jsonrpc":"2.0","id":%d,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true,"sessionCapabilities":{"close":{}}}}}`+"\n", *env.ID)
 	case "session/new":
+		if os.Getenv("GO_WANT_MOCK_ACP_LIST_ONLY") == "1" {
+			fmt.Printf(`{"jsonrpc":"2.0","id":%d,"error":{"code":-32600,"message":"unexpected session creation"}}`+"\n", *env.ID)
+			return
+		}
 		fmt.Printf(`{"jsonrpc":"2.0","id":%d,"result":{"sessionId":"sess-mock-1"}}`+"\n", *env.ID)
+	case "session/list":
+		var params struct {
+			Cwd    string `json:"cwd"`
+			Cursor string `json:"cursor"`
+		}
+		_ = json.Unmarshal(env.Params, &params)
+		page := agySessionPage{Sessions: []agySessionInfo{}, NextCursor: "next-page"}
+		if params.Cursor == "previous-page" {
+			page.Sessions = append(page.Sessions, agySessionInfo{SessionID: "existing", Cwd: params.Cwd, Title: "기존 대화"})
+		}
+		body, _ := json.Marshal(page)
+		fmt.Printf(`{"jsonrpc":"2.0","id":%d,"result":%s}`+"\n", *env.ID, body)
 	case "session/load":
 		fmt.Println(`{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"REPLAY_OLD_NOISE"}}}}`)
 		fmt.Printf(`{"jsonrpc":"2.0","id":%d,"result":{"sessionId":"sess-loaded"}}`+"\n", *env.ID)
@@ -103,6 +119,24 @@ func TestBoardAndMessageLifecycle(t *testing.T) {
 	_, err = d.CallTool(ctx, "a2a_task_status", map[string]any{"task_id": "task-missing"})
 	if !errors.Is(err, ErrTaskNotFound) {
 		t.Fatalf("없는 태스크 에러 = %v, 원하는 값 %v", err, ErrTaskNotFound)
+	}
+}
+
+func TestListAgySessionsWithoutOpeningSession(t *testing.T) {
+	t.Setenv("GO_WANT_MOCK_ACP", "1")
+	t.Setenv("GO_WANT_MOCK_ACP_LIST_ONLY", "1")
+	pool := NewSessionPool([]string{os.Args[0], "-test.run=TestHelperMockACPServer"})
+	cwd := t.TempDir()
+	page, err := pool.listAgySessions(context.Background(), cwd, "previous-page")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := agySessionInfo{SessionID: "existing", Cwd: cwd, Title: "기존 대화"}
+	if len(page.Sessions) != 1 || page.Sessions[0] != want || page.NextCursor != "next-page" {
+		t.Fatalf("세션 목록 = %+v, 원하는 세션 = %+v와 다음 커서", page, want)
+	}
+	if len(pool.Snapshots()) != 0 {
+		t.Fatal("목록 조회가 세션 풀에 워커를 남겼습니다")
 	}
 }
 

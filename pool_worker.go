@@ -10,10 +10,24 @@ import (
 )
 
 func spawnACPWorker(command []string, cwd, sessionID string) (*acpWorker, error) {
+	w, err := startACPWorker(context.Background(), command, cwd)
+	if err != nil {
+		return nil, err
+	}
+	sid, err := w.openSession(sessionID)
+	if err != nil {
+		w.killProcess()
+		return nil, err
+	}
+	w.sessionID = sid
+	return w, nil
+}
+
+func startACPWorker(ctx context.Context, command []string, cwd string) (*acpWorker, error) {
 	if len(command) == 0 {
 		return nil, fmt.Errorf("ACP 실행 명령이 비어 있음")
 	}
-	cmd := exec.Command(command[0], command[1:]...)
+	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
 	cmd.Dir = cwd
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -44,12 +58,6 @@ func spawnACPWorker(command []string, cwd, sessionID string) (*acpWorker, error)
 		w.killProcess()
 		return nil, err
 	}
-	sid, err := w.openSession(sessionID)
-	if err != nil {
-		w.killProcess()
-		return nil, err
-	}
-	w.sessionID = sid
 	return w, nil
 }
 
