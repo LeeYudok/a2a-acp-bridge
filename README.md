@@ -361,7 +361,7 @@ a2a-acp-bridge serve-a2a -addr 127.0.0.1:8765
 | `inbox` | `-all`(읽은 메시지 포함), 위치 인자로 `agy`·`codex`·`claude`·`user` |
 | `serve-a2a` | `-addr`(기본 `127.0.0.1:8765`) |
 
-`-from`의 값은 `agy`, `codex`, `claude`, `user` 중 하나다. 없으면 `A2A_AGENT_ID`, 그것도 없으면 `user`로 기록한다. `-no-wait`는 결과 JSON을 즉시 출력하지만, CLI 프로세스는 백그라운드 작업이 끝날 때까지 종료하지 않는다. `inbox`는 조회한 메시지를 읽음 처리한다(`-all`을 줘도 같다).
+`-from`의 값은 `agy`, `codex`, `claude`, `user` 중 하나다. 없으면 `A2A_AGENT_ID`, 그것도 없으면 `user`로 기록한다. `-no-wait`는 결과 JSON을 즉시 출력하지만, CLI 프로세스는 백그라운드 작업이 끝날 때까지 종료하지 않는다. 백그라운드 작업에도 `-timeout` 이 적용된다(MCP 서버의 async 작업은 상한 없음). `-cwd` 를 주지 않고 `-s` 로 명명 세션을 이어가면 그 세션을 만든 디렉터리에서 실행한다. Claude Code·ACP 세션은 프로젝트 디렉터리에 묶여 있어 다른 디렉터리에서는 이어지지 않기 때문이다. `inbox`는 조회한 메시지를 읽음 처리한다(`-all`을 줘도 같다).
 
 ---
 

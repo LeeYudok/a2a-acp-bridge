@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestClaudeDelegationRecordsCallerAndSession(t *testing.T) {
@@ -37,5 +38,52 @@ func TestClaudeDelegationRecordsCallerAndSession(t *testing.T) {
 	}
 	if _, err := d.CallTool(ctx, "a2a_delegate_to_claude", map[string]any{"prompt": "x", "permission_mode": "bypassPermissions"}); err == nil {
 		t.Fatal("허용하지 않은 permission_mode 는 거부해야 함")
+	}
+}
+
+func writeFakeClaude(t *testing.T, body string) {
+	t.Helper()
+	script := filepath.Join(t.TempDir(), "fake-claude")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\ncat >/dev/null\n"+body), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("A2A_CLAUDE_COMMAND", script)
+}
+
+// 명명 세션을 cwd 없이 이어가면 그 세션을 만든 디렉터리에서 실행해야 한다(PR #14 Codex 리뷰 P2)
+func TestClaudeNamedSessionReusesStoredCwd(t *testing.T) {
+	writeFakeClaude(t, `printf '{"type":"result","is_error":false,"result":"%s","session_id":"sess-cwd"}' "$PWD"`+"\n")
+	d := newTestDispatcher(t, nil)
+	repo, _ := filepath.EvalSymlinks(t.TempDir())
+	ctx := context.Background()
+	if _, err := d.CallTool(ctx, "a2a_delegate_to_claude", map[string]any{"prompt": "1", "session_name": "rev", "cwd": repo}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := d.CallTool(ctx, "a2a_delegate_to_claude", map[string]any{"prompt": "2", "session_name": "rev"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := filepath.EvalSymlinks(raw.(ClaudeDelegateResult).Response); got != repo {
+		t.Fatalf("두 번째 호출 cwd = %q, 원하는 값(저장된 세션 cwd) %q", got, repo)
+	}
+}
+
+// async 작업도 AsyncTimeout 을 지켜야 한다(PR #14 Codex 리뷰 P2)
+func TestAsyncDelegationHonorsTimeout(t *testing.T) {
+	writeFakeClaude(t, "sleep 5\n")
+	d := newTestDispatcher(t, nil)
+	d.AsyncTimeout = 300 * time.Millisecond
+	start := time.Now()
+	raw, err := d.CallTool(context.Background(), "a2a_delegate_to_claude", map[string]any{"prompt": "느린 일", "async": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Wait()
+	if elapsed := time.Since(start); elapsed > 4*time.Second {
+		t.Fatalf("async 작업이 타임아웃을 무시함: %s", elapsed)
+	}
+	task, err := d.Board.GetTask(raw.(ClaudeDelegateResult).TaskID)
+	if err != nil || task.State != "failed" {
+		t.Fatalf("타임아웃된 태스크 상태 = %q (%v), 원하는 값 failed", task.State, err)
 	}
 }

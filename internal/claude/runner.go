@@ -83,9 +83,10 @@ func Run(ctx context.Context, cwd, permissionMode, prompt, sessionID string) (Re
 		return Result{}, withStderr("claude -p", err, stderr.String())
 	}
 	if runErr != nil {
-		// 실행 오류여도 stdout 에 is_error JSON 이 있으면 그 내용이 더 정확하다
-		if _, perr := ParseOutput(stdout.Bytes()); perr != nil && stdout.Len() > 0 {
-			return Result{}, withStderr("claude -p", perr, stderr.String())
+		// stdout 이 is_error 결과 JSON 이면 그 내용이 종료 코드보다 정확하다. 그 밖의 출력이면 종료 오류를 그대로 쓴다.
+		var out printOutput
+		if json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &out) == nil && out.IsError {
+			return Result{}, withStderr("claude -p", fmt.Errorf("claude 실행 오류(%s): %s: %w", out.Subtype, out.Result, runErr), stderr.String())
 		}
 		return Result{}, withStderr("claude -p", runErr, stderr.String())
 	}

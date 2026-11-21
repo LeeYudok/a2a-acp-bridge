@@ -30,12 +30,13 @@ type claudeTurn struct {
 
 func (d *Dispatcher) callDelegateClaude(ctx context.Context, args map[string]any) (ClaudeDelegateResult, error) {
 	sessionName := strArg(args, "session_name", "")
+	sid, cwd := d.resolveAgentSession("claude", args, "session_id")
 	turn := claudeTurn{
 		from:        d.caller(args),
-		cwd:         strArg(args, "cwd", d.DefaultCwd),
+		cwd:         cwd,
+		sid:         sid,
 		mode:        strArg(args, "permission_mode", claude.DefaultPermissionMode),
 		prompt:      strArg(args, "prompt", ""),
-		sid:         d.resolveAgentSessionID("claude", strArg(args, "session_id", ""), sessionName),
 		sessionName: sessionName,
 	}
 	if !slices.Contains(claude.PermissionModes, turn.mode) {
@@ -54,7 +55,9 @@ func (d *Dispatcher) callDelegateClaude(ctx context.Context, args map[string]any
 	d.asyncWG.Add(1)
 	go func() {
 		defer d.asyncWG.Done()
-		_, _ = d.executeClaudeTurn(context.Background(), turn)
+		actx, cancel := d.asyncContext()
+		defer cancel()
+		_, _ = d.executeClaudeTurn(actx, turn)
 	}()
 	return ClaudeDelegateResult{
 		Agent:          "claude",

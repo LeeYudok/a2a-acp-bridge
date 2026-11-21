@@ -98,6 +98,21 @@ func resolveWorkDir(flagVal, fallback string) string {
 	return fallback
 }
 
+// explicitFlag 는 플래그를 명령줄에서 직접 줬을 때만 값을 돌려준다. 안 줬으면 빈 문자열이다.
+// 위임 cwd 를 비워 두면 dispatch 가 명명 세션에 저장된 디렉터리, 그다음 현재 디렉터리를 쓴다.
+func explicitFlag(fs *flag.FlagSet, name, val string) string {
+	set := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			set = true
+		}
+	})
+	if set {
+		return val
+	}
+	return ""
+}
+
 func printResult(v any, err error) error {
 	if err != nil {
 		return err

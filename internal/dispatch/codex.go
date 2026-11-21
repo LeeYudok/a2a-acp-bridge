@@ -26,12 +26,13 @@ type codexTurn struct {
 
 func (d *Dispatcher) callDelegateCodex(ctx context.Context, args map[string]any) (CodexDelegateResult, error) {
 	sessionName := strArg(args, "session_name", "")
+	tid, cwd := d.resolveAgentSession("codex", args, "thread_id")
 	turn := codexTurn{
 		from:        d.caller(args),
-		cwd:         strArg(args, "cwd", d.DefaultCwd),
+		cwd:         cwd,
+		tid:         tid,
 		sandbox:     strArg(args, "sandbox", "workspace-write"),
 		prompt:      strArg(args, "prompt", ""),
-		tid:         d.resolveAgentSessionID("codex", strArg(args, "thread_id", ""), sessionName),
 		sessionName: sessionName,
 	}
 
@@ -47,7 +48,9 @@ func (d *Dispatcher) callDelegateCodex(ctx context.Context, args map[string]any)
 	d.asyncWG.Add(1)
 	go func() {
 		defer d.asyncWG.Done()
-		_, _ = d.executeCodexTurn(context.Background(), turn)
+		actx, cancel := d.asyncContext()
+		defer cancel()
+		_, _ = d.executeCodexTurn(actx, turn)
 	}()
 	return CodexDelegateResult{
 		Agent:       "codex",

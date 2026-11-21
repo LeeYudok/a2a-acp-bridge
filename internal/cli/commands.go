@@ -30,6 +30,7 @@ func runAskAgyCmd(ctx context.Context, d *dispatch.Dispatcher, cwd string, rest 
 		return fmt.Errorf("ask-agy: %w", err)
 	}
 	defer cancel()
+	d.AsyncTimeout = *timeout
 	res, err := d.CallTool(cmdCtx, "acp_delegate_to_agy", map[string]any{
 		"prompt":       fs.Arg(0),
 		"session_id":   *sid,
@@ -37,7 +38,7 @@ func runAskAgyCmd(ctx context.Context, d *dispatch.Dispatcher, cwd string, rest 
 		"mode":         *mode,
 		"model":        *model,
 		"async":        *noWait,
-		"cwd":          resolveWorkDir(*workDir, cwd),
+		"cwd":          explicitFlag(fs, "cwd", *workDir),
 		"from_agent":   *from,
 	})
 	return printResult(res, err)
@@ -83,13 +84,14 @@ func runAskCodexCmd(ctx context.Context, d *dispatch.Dispatcher, cwd string, res
 		return fmt.Errorf("ask-codex: %w", err)
 	}
 	defer cancel()
+	d.AsyncTimeout = *timeout
 	res, err := d.CallTool(cmdCtx, "a2a_delegate_to_codex", map[string]any{
 		"prompt":       fs.Arg(0),
 		"thread_id":    *tid,
 		"session_name": *sname,
 		"sandbox":      *sandbox,
 		"async":        *noWait,
-		"cwd":          resolveWorkDir(*workDir, cwd),
+		"cwd":          explicitFlag(fs, "cwd", *workDir),
 		"from_agent":   *from,
 	})
 	return printResult(res, err)
@@ -195,13 +197,14 @@ func runAskClaudeCmd(ctx context.Context, d *dispatch.Dispatcher, cwd string, re
 		return fmt.Errorf("ask-claude: %w", err)
 	}
 	defer cancel()
+	d.AsyncTimeout = *timeout
 	res, err := d.CallTool(cmdCtx, "a2a_delegate_to_claude", map[string]any{
 		"prompt":          fs.Arg(0),
 		"session_id":      *sid,
 		"session_name":    *sname,
 		"permission_mode": *mode,
 		"async":           *noWait,
-		"cwd":             resolveWorkDir(*workDir, cwd),
+		"cwd":             explicitFlag(fs, "cwd", *workDir),
 		"from_agent":      *from,
 	})
 	return printResult(res, err)

@@ -2,7 +2,9 @@ package claude
 
 import (
 	"context"
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -64,5 +66,15 @@ func TestRunPropagatesCancellation(t *testing.T) {
 	defer cancel()
 	if _, err := Run(ctx, t.TempDir(), "plan", "q", ""); err == nil || ctx.Err() == nil {
 		t.Fatalf("취소 오류를 돌려줘야 함: %v", err)
+	}
+}
+
+// stdout 에 결과 JSON 이 아닌 출력이 있으면 종료 오류를 가리지 않아야 한다(PR #14 Codex 리뷰 P3)
+func TestRunKeepsExitErrorWhenStdoutIsNotResult(t *testing.T) {
+	fakeClaude(t, "echo starting; exit 7\n")
+	_, err := Run(context.Background(), t.TempDir(), "plan", "q", "")
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 7 {
+		t.Fatalf("종료 코드 7 의 ExitError 를 돌려줘야 함: %v", err)
 	}
 }
