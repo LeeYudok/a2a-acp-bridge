@@ -97,6 +97,7 @@ AI 코딩 에이전트 셋(`agy`, `codex`, `claude`)을 함께 쓸 때 프로세
 **Codex**
 - 새 실행은 `codex exec --skip-git-repo-check --json -s <sandbox> <prompt>`다. `sandbox`는 `read-only` 또는 `workspace-write`이고 기본값은 `workspace-write`다.
 - 스레드를 이어갈 때는 `codex exec resume --skip-git-repo-check --json <thread_id> <prompt>`를 쓴다. 이때는 `-s`를 넘기지 않는다.
+- 호출자와 대상 Codex의 `CODEX_HOME`이 다르면 `A2A_CODEX_HOME`으로 대상 홈을 지정한다. 브리지는 자식 Codex에만 이 값을 적용하고 `CODEX_SESSION_ID`·`CODEX_THREAD_ID`·`CODEX_TOOL_CALL_ID`는 상속하지 않는다.
 - stdout의 JSONL에서 `thread.started`의 `thread_id`와 `item.completed` 중 `agent_message`의 텍스트를 모은다. 마지막 메시지가 `response`이고 전부가 `all_messages`다. JSONL 한 줄은 최대 4 MiB까지 읽는다.
 - stderr는 본문 파싱에 섞지 않고 오류 진단에만 덧붙인다. 실행 실패, 타임아웃, 취소는 stderr와 함께 오류로 전달되고 태스크는 `failed`가 된다.
 
@@ -178,6 +179,15 @@ MCP로 붙은 에이전트의 이름을 인식하지 못하면 발신자가 `use
 agy mcp add --env A2A_AGENT_ID=agy a2a-acp-bridge -- ~/.local/bin/a2a-acp-bridge mcp
 codex mcp add --env A2A_AGENT_ID=codex a2a-acp-bridge -- ~/.local/bin/a2a-acp-bridge mcp
 claude mcp add a2a-acp-bridge -e A2A_AGENT_ID=claude -- ~/.local/bin/a2a-acp-bridge mcp
+```
+
+호출자와 대상 Codex가 서로 다른 홈을 쓰면 대상 홈도 함께 넘긴다. 예를 들어 DeepSeek Codex에서 정식 Codex를 호출할 때는 다음과 같이 등록한다.
+
+```sh
+codex mcp add \
+  --env A2A_AGENT_ID=codex \
+  --env A2A_CODEX_HOME=/Users/me/.codex \
+  a2a-acp-bridge -- ~/.local/bin/a2a-acp-bridge mcp
 ```
 
 ### 4.3 SSH 원격 호스트 MCP 등록
@@ -315,6 +325,9 @@ a2a-acp-bridge ask-agy -s backend -no-wait "전체 패키지 정적 분석 실�
 # 4. Codex에게 읽기 전용(read-only) 코드 리뷰 위임
 a2a-acp-bridge ask-codex -s review -sandbox read-only -cwd /path/to/repo -timeout 5m "최근 커밋의 에러 래핑 누락 여부 확인해줘"
 
+# 4-1. 다른 CODEX_HOME의 Codex 스레드에 위임
+A2A_CODEX_HOME=/Users/me/.codex A2A_AGENT_ID=codex a2a-acp-bridge ask-codex -thread-id <thread-id> -sandbox read-only -cwd /path/to/repo -timeout 5m "현재 작업 상태를 알려줘"
+
 # 5. Claude Code에게 읽기 전용 리뷰 위임 (기본 plan), 같은 -s 이름으로 이어가기
 a2a-acp-bridge ask-claude -s review -cwd /path/to/repo -timeout 5m "internal/board 락 순서를 검토해줘"
 a2a-acp-bridge ask-claude -s review "방금 지적한 부분을 어떻게 고치면 되는지 알려줘"
@@ -408,6 +421,7 @@ curl -s http://127.0.0.1:8765/a2a \
 | `A2A_BRIDGE_STORE` | `~/.local/share/a2a-acp-bridge/a2a_board.json` | 태스크·메시지·명명 세션을 저장하는 JSON 파일 경로 |
 | `A2A_ACP_COMMAND` | `agy acp --dangerously-skip-permissions` | ACP 워커가 실행할 명령어와 인자 재정의 |
 | `A2A_CODEX_COMMAND` | `codex` | Codex 위임 시 실행할 바이너리 명령 재정의. 공백으로 나눈 첫 토큰이 실행 파일이고 나머지는 인자 앞에 붙는다 |
+| `A2A_CODEX_HOME` | (없음) | Codex 자식 프로세스에만 적용할 `CODEX_HOME`. DeepSeek Codex에서 정식 Codex처럼 다른 홈의 Codex를 호출할 때 지정한다 |
 | `A2A_CLAUDE_COMMAND` | `claude` | Claude Code 위임 시 실행할 바이너리 명령 재정의. 규칙은 `A2A_CODEX_COMMAND`와 같다 |
 | `A2A_AGENT_ID` | (없음) | 이 프로세스를 부르는 에이전트 ID(`agy`·`codex`·`claude`). 위임·`send` 에 `from_agent`·`-from` 이 없으면 이 값을 발신자로 기록하고, 이것도 없으면 `user` 로 기록한다. MCP 서버는 이 값이 비어 있을 때만 initialize 의 `clientInfo.name` 으로 발신자를 추정한다 |
 

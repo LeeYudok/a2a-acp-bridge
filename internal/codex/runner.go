@@ -109,6 +109,7 @@ func runOnce(ctx context.Context, cwd, sandbox, promptText, threadID string) (st
 	}
 	cmd := exec.CommandContext(ctx, cmdName, args...)
 	cmd.Dir = cwd
+	cmd.Env = childEnv()
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -127,6 +128,28 @@ func runOnce(ctx context.Context, cwd, sandbox, promptText, threadID string) (st
 		return "", nil, outputError("parse codex exec stdout", errors.New("no thread ID or agent messages"), stderr.String())
 	}
 	return tid, msgs, nil
+}
+
+// childEnv 는 부모 Codex 의 실행 문맥을 자식에게 넘기지 않고, 필요하면 대상 CODEX_HOME 만 교체한다.
+func childEnv() []string {
+	targetHome := strings.TrimSpace(os.Getenv("A2A_CODEX_HOME"))
+	env := make([]string, 0, len(os.Environ())+1)
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		switch key {
+		case "CODEX_SESSION_ID", "CODEX_THREAD_ID", "CODEX_TOOL_CALL_ID":
+			continue
+		case "CODEX_HOME":
+			if targetHome != "" {
+				continue
+			}
+		}
+		env = append(env, entry)
+	}
+	if targetHome != "" {
+		env = append(env, "CODEX_HOME="+targetHome)
+	}
+	return env
 }
 
 // outputError 는 오류에 stderr 진단 내용을 덧붙인다
