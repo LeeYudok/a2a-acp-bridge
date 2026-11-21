@@ -68,7 +68,7 @@ func runAskCodexCmd(ctx context.Context, d *dispatch.Dispatcher, cwd string, res
 	fs := flag.NewFlagSet("ask-codex", flag.ContinueOnError)
 	tid := fs.String("thread-id", "", "이어갈 Codex 스레드 ID")
 	sname := fs.String("s", "", "acpx 스타일의 명명 세션")
-	sandbox := fs.String("sandbox", "workspace-write", "샌드박스 모드")
+	sandbox := fs.String("sandbox", "", "샌드박스 모드 (새 실행 기본: workspace-write)")
 	noWait := fs.Bool("no-wait", false, "비동기 큐 등록 후 즉시 반환")
 	workDir := fs.String("cwd", cwd, "작업 디렉터리")
 	timeout := fs.Duration("timeout", defaultCommandTimeout, "실행 타임아웃 (예: 3m, 10m)")

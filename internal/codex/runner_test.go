@@ -125,12 +125,33 @@ func TestResumeLeavesSandboxToThread(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("A2A_CODEX_COMMAND", script)
-	_, msgs, err := runOnce(context.Background(), t.TempDir(), "read-only", "질문", "thread-1")
+	_, msgs, err := runOnce(context.Background(), t.TempDir(), "", "질문", "thread-1")
 	if err != nil {
 		t.Fatalf("runOnce 실패: %v", err)
 	}
 	if len(msgs) != 1 || !strings.HasPrefix(msgs[0], "exec resume ") || strings.Contains(msgs[0], " -s ") || !strings.Contains(msgs[0], "thread-1") {
 		t.Fatalf("재개 인자 = %q, 원하는 값 exec resume ... thread-1", msgs)
+	}
+}
+
+func TestResumePassesExplicitSandbox(t *testing.T) {
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("sh is unavailable")
+	}
+	script := filepath.Join(t.TempDir(), "codex-resume")
+	body := "#!/bin/sh\n" +
+		`printf '%s\n' '{"type":"thread.started","thread_id":"thread-1"}'` + "\n" +
+		`printf '{"type":"item.completed","item":{"type":"agent_message","text":"%s"}}\n' "$*"` + "\n"
+	if err := os.WriteFile(script, []byte(body), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("A2A_CODEX_COMMAND", script)
+	_, msgs, err := runOnce(context.Background(), t.TempDir(), "read-only", "질문", "thread-1")
+	if err != nil {
+		t.Fatalf("runOnce 실패: %v", err)
+	}
+	if len(msgs) != 1 || !strings.HasPrefix(msgs[0], "-s read-only exec resume ") || !strings.Contains(msgs[0], "thread-1") {
+		t.Fatalf("재개 인자 = %q, 원하는 값 -s read-only exec resume ... thread-1", msgs)
 	}
 }
 

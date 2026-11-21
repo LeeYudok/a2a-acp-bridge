@@ -31,7 +31,7 @@ func (d *Dispatcher) callDelegateCodex(ctx context.Context, args map[string]any)
 		from:        d.caller(args),
 		cwd:         cwd,
 		tid:         tid,
-		sandbox:     strArg(args, "sandbox", "workspace-write"),
+		sandbox:     strArg(args, "sandbox", ""),
 		prompt:      strArg(args, "prompt", ""),
 		sessionName: sessionName,
 	}

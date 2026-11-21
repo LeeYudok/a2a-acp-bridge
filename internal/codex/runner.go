@@ -96,12 +96,17 @@ func lastMessage(msgs []string) string {
 }
 
 func runOnce(ctx context.Context, cwd, sandbox, promptText, threadID string) (string, []string, error) {
-	if sandbox == "" {
-		sandbox = "workspace-write"
-	}
-	args := []string{"-s", sandbox, "exec", "--skip-git-repo-check", "--json", promptText}
+	var args []string
 	if threadID != "" {
 		args = []string{"exec", "resume", "--skip-git-repo-check", "--json", threadID, promptText}
+		if sandbox != "" {
+			args = append([]string{"-s", sandbox}, args...)
+		}
+	} else {
+		if sandbox == "" {
+			sandbox = "workspace-write"
+		}
+		args = []string{"-s", sandbox, "exec", "--skip-git-repo-check", "--json", promptText}
 	}
 	cmdName := "codex"
 	if parts := strings.Fields(os.Getenv("A2A_CODEX_COMMAND")); len(parts) > 0 {
