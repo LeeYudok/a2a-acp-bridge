@@ -291,5 +291,6 @@ curl -s http://127.0.0.1:8765/a2a \
 | `A2A_BRIDGE_STORE` | `~/.local/share/a2a-acp-bridge/a2a_board.json` | 태스크·메시지·명명 세션을 저장하는 JSON 파일 경로 |
 | `A2A_ACP_COMMAND` | `agy acp --dangerously-skip-permissions` | ACP 워커가 실행할 명령어와 인자 재정의 |
 | `A2A_CODEX_COMMAND` | `codex` | Codex 위임 시 실행할 바이너리 명령 재정의 |
+| `A2A_AGENT_ID` | (없음) | CLI 를 부르는 에이전트 ID(`agy`·`codex`·`claude`). 위임·`send` 에 `-from` 이 없으면 이 값을 발신자로 기록하고, 이것도 없으면 `user` 로 기록한다. MCP 서버는 initialize 의 `clientInfo.name` 으로 발신자를 추정한다 |
 
 보드 저장소(`a2a_board.json`)는 프로세스 내부 뮤텍스와 Unix OS 파일 락(`a2a_board.json.lock`, `flock`)으로 다중 프로세스 동시 쓰기를 직렬화한다. 같은 디렉터리에 `os.CreateTemp`로 고유 임시 파일을 만들고 권한 `0600`으로 쓴 뒤 `os.Rename`으로 원자적 교체한다.

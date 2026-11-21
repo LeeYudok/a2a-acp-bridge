@@ -21,12 +21,13 @@ type CodexDelegateResult struct {
 const codexProtocol = "Codex-JSONL-exec"
 
 type codexTurn struct {
-	cwd, sandbox, prompt, tid, sessionName, taskID string
+	from, cwd, sandbox, prompt, tid, sessionName, taskID string
 }
 
 func (d *Dispatcher) callDelegateCodex(ctx context.Context, args map[string]any) (CodexDelegateResult, error) {
 	sessionName := strArg(args, "session_name", "")
 	turn := codexTurn{
+		from:        d.caller(args),
 		cwd:         strArg(args, "cwd", d.DefaultCwd),
 		sandbox:     strArg(args, "sandbox", "workspace-write"),
 		prompt:      strArg(args, "prompt", ""),
@@ -34,7 +35,7 @@ func (d *Dispatcher) callDelegateCodex(ctx context.Context, args map[string]any)
 		sessionName: sessionName,
 	}
 
-	msg, err := d.Board.SendMessage("agy", "codex", turn.prompt, "delegate", "")
+	msg, err := d.Board.SendMessage(turn.from, "codex", turn.prompt, "delegate", "")
 	if err != nil {
 		return CodexDelegateResult{}, err
 	}
@@ -42,7 +43,7 @@ func (d *Dispatcher) callDelegateCodex(ctx context.Context, args map[string]any)
 	if !boolArg(args, "async", false) {
 		return d.executeCodexTurn(ctx, turn)
 	}
-	_, _ = d.Board.UpsertTask("agy", "codex", turn.prompt, "working", turn.taskID, turn.tid)
+	_, _ = d.Board.UpsertTask(turn.from, "codex", turn.prompt, "working", turn.taskID, turn.tid)
 	d.asyncWG.Add(1)
 	go func() {
 		defer d.asyncWG.Done()
@@ -62,14 +63,14 @@ func (d *Dispatcher) callDelegateCodex(ctx context.Context, args map[string]any)
 func (d *Dispatcher) executeCodexTurn(ctx context.Context, t codexTurn) (CodexDelegateResult, error) {
 	res, err := codex.Run(ctx, t.cwd, t.sandbox, t.prompt, t.tid)
 	if err != nil {
-		_, _ = d.Board.UpsertTask("agy", "codex", t.prompt, "failed", t.taskID, t.tid)
+		_, _ = d.Board.UpsertTask(t.from, "codex", t.prompt, "failed", t.taskID, t.tid)
 		return CodexDelegateResult{}, err
 	}
 	if t.sessionName != "" && res.ThreadID != "" {
 		_, _ = d.Board.UpsertSession(t.sessionName, "codex", res.ThreadID, t.cwd, "", "")
 	}
-	_, _ = d.Board.SendMessage("codex", "agy", res.Response, "reply", t.taskID)
-	_, _ = d.Board.UpsertTask("agy", "codex", t.prompt, "completed", t.taskID, res.ThreadID)
+	_, _ = d.Board.SendMessage("codex", t.from, res.Response, "reply", t.taskID)
+	_, _ = d.Board.UpsertTask(t.from, "codex", t.prompt, "completed", t.taskID, res.ThreadID)
 	return CodexDelegateResult{
 		Agent:       "codex",
 		Protocol:    codexProtocol,

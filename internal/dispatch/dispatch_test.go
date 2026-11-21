@@ -37,7 +37,7 @@ func TestBoardAndMessageLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a2a_discover_agents 실패: %v", err)
 	}
-	if got, want := len(rawCards.(agents.Discovery).Agents), 2; got != want {
+	if got, want := len(rawCards.(agents.Discovery).Agents), 3; got != want {
 		t.Fatalf("에이전트 수 = %d, 원하는 값 %d", got, want)
 	}
 

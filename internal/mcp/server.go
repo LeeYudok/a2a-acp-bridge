@@ -9,6 +9,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/LeeYudok/a2a-acp-bridge/internal/agents"
 	"github.com/LeeYudok/a2a-acp-bridge/internal/dispatch"
 	"github.com/LeeYudok/a2a-acp-bridge/internal/jsonrpc"
 )
@@ -20,6 +21,7 @@ func Handle(ctx context.Context, d *dispatch.Dispatcher, req jsonrpc.Request) ma
 	}
 	switch req.Method {
 	case "initialize":
+		rememberClient(d, req.Params)
 		return result(req.ID, map[string]any{
 			"protocolVersion": "2024-11-05",
 			"capabilities":    map[string]any{"tools": map[string]any{}},
@@ -38,6 +40,17 @@ func Handle(ctx context.Context, d *dispatch.Dispatcher, req jsonrpc.Request) ma
 			"error":   map[string]any{"code": -32601, "message": "Method not found: " + req.Method},
 		}
 	}
+}
+
+// rememberClient 는 Caller 가 비어 있으면 initialize 의 clientInfo.name 으로 호출 에이전트를 정한다.
+// 그러면 Codex·AGY 가 MCP 로 위임할 때 from_agent 를 빼도 보드에 제 이름으로 기록된다.
+func rememberClient(d *dispatch.Dispatcher, params map[string]any) {
+	if d.Caller != "" {
+		return
+	}
+	info, _ := params["clientInfo"].(map[string]any)
+	name, _ := info["name"].(string)
+	d.Caller = agents.FromClientName(name)
 }
 
 func result(id any, payload map[string]any) map[string]any {

@@ -16,7 +16,7 @@ import (
 func TestServeHandlesInitializeAndToolsList(t *testing.T) {
 	d := &dispatch.Dispatcher{Board: board.New(filepath.Join(t.TempDir(), "board.json")), Pool: acp.NewSessionPool(nil), DefaultCwd: t.TempDir()}
 	in := strings.NewReader(strings.Join([]string{
-		`{"jsonrpc":"2.0","id":1,"method":"initialize"}`,
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"codex-mcp-client"}}}`,
 		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
 		`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`,
 		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"no_such_tool"}}`,
@@ -28,6 +28,9 @@ func TestServeHandlesInitializeAndToolsList(t *testing.T) {
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
 	if got, want := len(lines), 3; got != want {
 		t.Fatalf("MCP 출력 줄 수 = %d, 원하는 값 %d (알림에는 응답하지 않아야 함)", got, want)
+	}
+	if d.Caller != "codex" {
+		t.Fatalf("initialize clientInfo 로 Caller 를 정해야 함: %q", d.Caller)
 	}
 	var last struct {
 		Result struct {

@@ -37,6 +37,7 @@ func Run(args []string) error {
 		Board:      board.New(storePath),
 		Pool:       acp.NewSessionPool(nil),
 		DefaultCwd: cwd,
+		Caller:     os.Getenv("A2A_AGENT_ID"),
 	}
 	defer d.Close()
 

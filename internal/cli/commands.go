@@ -18,6 +18,7 @@ func runAskAgyCmd(ctx context.Context, d *dispatch.Dispatcher, cwd string, rest 
 	noWait := fs.Bool("no-wait", false, "비동기 큐 등록 후 즉시 반환")
 	workDir := fs.String("cwd", cwd, "작업 디렉터리")
 	timeout := fs.Duration("timeout", defaultCommandTimeout, "실행 타임아웃 (예: 3m, 10m)")
+	from := fs.String("from", "", "보드에 기록할 발신자 (agy|codex|claude|user, 기본: A2A_AGENT_ID 또는 user)")
 	if err := fs.Parse(rest); err != nil {
 		return err
 	}
@@ -37,6 +38,7 @@ func runAskAgyCmd(ctx context.Context, d *dispatch.Dispatcher, cwd string, rest 
 		"model":        *model,
 		"async":        *noWait,
 		"cwd":          resolveWorkDir(*workDir, cwd),
+		"from_agent":   *from,
 	})
 	return printResult(res, err)
 }
@@ -69,6 +71,7 @@ func runAskCodexCmd(ctx context.Context, d *dispatch.Dispatcher, cwd string, res
 	noWait := fs.Bool("no-wait", false, "비동기 큐 등록 후 즉시 반환")
 	workDir := fs.String("cwd", cwd, "작업 디렉터리")
 	timeout := fs.Duration("timeout", defaultCommandTimeout, "실행 타임아웃 (예: 3m, 10m)")
+	from := fs.String("from", "", "보드에 기록할 발신자 (agy|codex|claude|user, 기본: A2A_AGENT_ID 또는 user)")
 	if err := fs.Parse(rest); err != nil {
 		return err
 	}
@@ -87,6 +90,7 @@ func runAskCodexCmd(ctx context.Context, d *dispatch.Dispatcher, cwd string, res
 		"sandbox":      *sandbox,
 		"async":        *noWait,
 		"cwd":          resolveWorkDir(*workDir, cwd),
+		"from_agent":   *from,
 	})
 	return printResult(res, err)
 }
@@ -131,8 +135,8 @@ func runSessionCtrlCmd(ctx context.Context, d *dispatch.Dispatcher, cwd, sub str
 
 func runSendCmd(ctx context.Context, d *dispatch.Dispatcher, rest []string) error {
 	fs := flag.NewFlagSet("send", flag.ContinueOnError)
-	from := fs.String("from", "user", "발신 에이전트 (agy|codex|user)")
-	to := fs.String("to", "codex", "수신 에이전트 (agy|codex)")
+	from := fs.String("from", "", "발신 에이전트 (agy|codex|claude|user, 기본: A2A_AGENT_ID 또는 user)")
+	to := fs.String("to", "codex", "수신 에이전트 (agy|codex|claude)")
 	intent := fs.String("intent", "delegate", "메시지 의도 (delegate|review|reply|chat|sync)")
 	taskID := fs.String("task-id", "", "태스크 ID")
 	if err := fs.Parse(rest); err != nil {
@@ -160,7 +164,7 @@ func runInboxCmd(ctx context.Context, d *dispatch.Dispatcher, rest []string) err
 		return err
 	}
 	if fs.NArg() < 1 {
-		return fmt.Errorf("inbox: 에이전트 ID(agy|codex)가 필요합니다")
+		return fmt.Errorf("inbox: 에이전트 ID(agy|codex|claude)가 필요합니다")
 	}
 	cmdCtx, cancel := context.WithTimeout(ctx, defaultCommandTimeout)
 	defer cancel()

@@ -36,7 +36,9 @@ type Dispatcher struct {
 	Board      *board.Board
 	Pool       *acp.SessionPool
 	DefaultCwd string
-	asyncWG    sync.WaitGroup
+	// Caller 는 요청에 from_agent 가 없을 때 쓰는 발신자 ID 다. 비어 있으면 user 로 기록한다.
+	Caller  string
+	asyncWG sync.WaitGroup
 }
 
 // Wait 는 비동기(--no-wait)로 큐잉된 모든 백그라운드 작업이 끝날 때까지 기다린다
@@ -50,6 +52,15 @@ func (d *Dispatcher) Close() {
 	if d.Pool != nil {
 		d.Pool.CloseAll()
 	}
+}
+
+// caller 는 요청의 from_agent, Dispatcher.Caller, user 순으로 발신자를 정한다
+func (d *Dispatcher) caller(args map[string]any) string {
+	def := d.Caller
+	if def == "" {
+		def = agents.User
+	}
+	return strArg(args, "from_agent", def)
 }
 
 func (d *Dispatcher) pool() (*acp.SessionPool, error) {
@@ -77,7 +88,7 @@ func (d *Dispatcher) CallTool(ctx context.Context, name string, args map[string]
 		return d.callSessionControl(args)
 	case "a2a_send_message":
 		return d.Board.SendMessage(
-			strArg(args, "from_agent", "user"),
+			d.caller(args),
 			strArg(args, "to_agent", "codex"),
 			strArg(args, "content", ""),
 			strArg(args, "intent", "delegate"),

@@ -46,7 +46,8 @@ func Discover(workspace string, sessions []board.NamedSession, recent []board.Ta
 	}
 }
 
-// Cards 는 AGY와 Codex의 Agent Card 를 반환한다
+// Cards 는 브리지에 참여하는 에이전트(agy, codex, claude)의 Agent Card 를 반환한다.
+// agy·codex 는 위임 대상이고, claude 는 보드로만 메시지를 주고받는 참여자다.
 func Cards() []Card {
 	return []Card{
 		{
@@ -88,6 +89,21 @@ func Cards() []Card {
 				{ID: "code-review", Name: "교차 코드 리뷰 및 버그 탐지"},
 				{ID: "task-execution", Name: "비대화형 작업 수행 및 검증"},
 				{ID: "thread-resume", Name: "스레드 기반 다중 턴 협업"},
+			},
+		},
+		{
+			ID:        "claude",
+			Name:      "Claude Code",
+			Version:   "2.1.330",
+			Protocols: []string{"A2A-board", "MCP"},
+			Endpoint:  "a2a-acp-bridge inbox claude",
+			Capabilities: map[string]bool{
+				"board_messaging": true,
+				"code_review":     true,
+			},
+			Skills: []Skill{
+				{ID: "code-review", Name: "교차 코드 리뷰 및 구조 개선"},
+				{ID: "task-execution", Name: "보드 요청 수행 및 이어받기"},
 			},
 		},
 	}
