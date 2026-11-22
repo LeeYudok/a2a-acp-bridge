@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -87,5 +88,59 @@ func TestMonitorSnapshotEndpointIsReadOnly(t *testing.T) {
 	}
 	if len(got.Agents) != 3 || len(got.Tasks) != 1 || got.Tasks[0].TaskID == "" || got.Sessions == nil {
 		t.Fatalf("snapshot = %s", raw)
+	}
+}
+
+func TestMonitorSnapshotDoesNotLeakBoardErrors(t *testing.T) {
+	dir := t.TempDir()
+	boardPath := filepath.Join(dir, "broken-board.json")
+	if err := os.WriteFile(boardPath, []byte("not json"), 0o600); err != nil {
+		t.Fatalf("write broken board: %v", err)
+	}
+	b := board.New(boardPath)
+	d := &dispatch.Dispatcher{Board: b, Pool: acp.NewSessionPool(nil), DefaultCwd: t.TempDir()}
+	srv := httptest.NewServer(NewMux(d))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/monitor/snapshot")
+	if err != nil {
+		t.Fatalf("GET /monitor/snapshot failed: %v", err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d: %s", resp.StatusCode, http.StatusInternalServerError, raw)
+	}
+	if !strings.Contains(string(raw), `"error":"snapshot unavailable"`) || strings.Contains(string(raw), boardPath) {
+		t.Fatalf("error response leaked board path: %s", raw)
+	}
+}
+
+func TestMonitorSnapshotCacheCoalescesPolling(t *testing.T) {
+	b := board.New(filepath.Join(t.TempDir(), "board.json"))
+	d := &dispatch.Dispatcher{Board: b, Pool: acp.NewSessionPool(nil), DefaultCwd: t.TempDir()}
+	srv := httptest.NewServer(NewMux(d))
+	defer srv.Close()
+
+	first, err := http.Get(srv.URL + "/monitor/snapshot")
+	if err != nil {
+		t.Fatalf("first snapshot: %v", err)
+	}
+	firstRaw, _ := io.ReadAll(first.Body)
+	first.Body.Close()
+	if _, err := b.SendMessage("codex", "agy", "new work", "delegate", ""); err != nil {
+		t.Fatalf("SendMessage failed: %v", err)
+	}
+	second, err := http.Get(srv.URL + "/monitor/snapshot")
+	if err != nil {
+		t.Fatalf("second snapshot: %v", err)
+	}
+	secondRaw, _ := io.ReadAll(second.Body)
+	second.Body.Close()
+	if !bytes.Equal(firstRaw, secondRaw) {
+		t.Fatalf("cache returned different snapshots within TTL:\nfirst=%s\nsecond=%s", firstRaw, secondRaw)
 	}
 }

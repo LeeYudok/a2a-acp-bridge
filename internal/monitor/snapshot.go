@@ -175,32 +175,52 @@ func buildAgent(card agents.Card, tasks []board.Task, sessions []board.NamedSess
 		IsCoordinator: coordinator != nil && coordinator.Leader == card.ID && board.CoordinatorStatus(coordinator, now) == "active",
 	}
 	var latest *board.Task
+	var current *board.Task
+	stateRank := 0
 	for i := range tasks {
-		if tasks[i].Assignee == card.ID {
-			latest = &tasks[i]
-			break
+		task := &tasks[i]
+		if task.Assignee != card.ID {
+			continue
+		}
+		if latest == nil {
+			latest = task
+		}
+		state := NormalizeState(task.State)
+		age := now.Sub(secondsTime(task.UpdatedAt))
+		rank := 0
+		switch state {
+		case "working":
+			if age > staleAfter {
+				state = "stale"
+				rank = 3
+			} else {
+				rank = 4
+			}
+		case "failed":
+			if age <= staleAfter {
+				rank = 2
+			}
+		case "submitted", "input-required":
+			rank = 1
+		}
+		if rank > stateRank {
+			stateRank = rank
+			current = task
 		}
 	}
 	if latest != nil {
 		out.LastActivityAt = formatSeconds(latest.UpdatedAt)
-		age := now.Sub(secondsTime(latest.UpdatedAt))
-		switch latest.State {
-		case "working":
-			out.State = "working"
-			if age > staleAfter {
-				out.State = "stale"
-			}
-		case "submitted", "input-required":
+	}
+	if current != nil {
+		age := now.Sub(secondsTime(current.UpdatedAt))
+		out.State = NormalizeState(current.State)
+		if out.State == "working" && age > staleAfter {
+			out.State = "stale"
+		} else if out.State == "submitted" || out.State == "input-required" {
 			out.State = "waiting"
-		case "failed":
-			if age <= staleAfter {
-				out.State = "failed"
-			}
 		}
-		if out.State == "working" || out.State == "waiting" || out.State == "stale" || out.State == "failed" {
-			out.CurrentTaskID = latest.TaskID
-			out.CurrentSession = sessionForTask(card.ID, latest.SessionRef, sessions)
-		}
+		out.CurrentTaskID = current.TaskID
+		out.CurrentSession = sessionForTask(card.ID, current.SessionRef, sessions)
 	}
 	if out.CurrentSession == "" {
 		for i := range sessions {

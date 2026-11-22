@@ -69,3 +69,16 @@ func TestBuildReturnsEmptySlices(t *testing.T) {
 		t.Fatalf("stale_after_seconds = %d, want %d", got.StaleAfterSeconds, int(DefaultStaleAfter/time.Second))
 	}
 }
+
+func TestBuildKeepsStaleWorkingTaskVisibleAfterNewerCompletion(t *testing.T) {
+	now := time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)
+	raw := board.Snapshot{Tasks: []board.Task{
+		{TaskID: "old-working", Assignee: "codex", State: " Working ", UpdatedAt: float64(now.Add(-10*time.Minute).UnixNano()) / 1e9},
+		{TaskID: "new-completed", Assignee: "codex", State: "completed", UpdatedAt: float64(now.Add(-time.Minute).UnixNano()) / 1e9},
+	}}
+	got := Build(raw, []agents.Card{{ID: "codex", Name: "Codex"}}, now, 5*time.Minute)
+	agent := got.Agents[0]
+	if agent.State != "stale" || agent.CurrentTaskID != "old-working" {
+		t.Fatalf("agent = %#v, want stale old-working", agent)
+	}
+}
