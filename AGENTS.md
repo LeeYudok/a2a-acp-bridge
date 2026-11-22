@@ -16,6 +16,7 @@
 | `internal/claude` | `claude -p --output-format json` 러너(Claude Code 위임) |
 | `internal/board` | 공유 보드(태스크·메시지·명명 세션)와 `coord.json` 지휘권 리스, 파일별 flock + 임시 파일 원자 저장 |
 | `internal/agents` | Agent Card, 내장·동적(`agents.json`) 에이전트 레지스트리, MCP clientInfo 추정 |
+| `internal/monitor` | 공유 보드와 지휘권 리스에서 본문·제목·`cwd`·세션 ID를 뺀 읽기 전용 모니터링 스냅샷을 만든다 |
 | `internal/mcp`, `internal/a2a` | MCP stdio 서버, A2A HTTP 서버 |
 | `internal/jsonrpc`, `internal/gate` | 공용 JSON-RPC 요청 타입, 개인 게이트 감지 |
 

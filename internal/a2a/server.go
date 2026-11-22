@@ -4,12 +4,35 @@ package a2a
 import (
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/LeeYudok/a2a-acp-bridge/internal/dispatch"
 	"github.com/LeeYudok/a2a-acp-bridge/internal/jsonrpc"
+	"github.com/LeeYudok/a2a-acp-bridge/internal/monitor"
 )
+
+const monitorCacheTTL = time.Second
+
+type monitorCache struct {
+	mu        sync.Mutex
+	fetchedAt time.Time
+	snapshot  monitor.Snapshot
+	err       error
+}
+
+func (c *monitorCache) capture(d *dispatch.Dispatcher, now time.Time) (monitor.Snapshot, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.fetchedAt.IsZero() && now.Sub(c.fetchedAt) < monitorCacheTTL {
+		return c.snapshot, c.err
+	}
+	c.snapshot, c.err = monitor.Capture(d.Board, now, monitor.DefaultStaleAfter)
+	c.fetchedAt = now
+	return c.snapshot, c.err
+}
 
 // methodTools 는 A2A JSON-RPC 메서드를 Dispatcher 도구 이름으로 잇는다
 var methodTools = map[string]string{
@@ -24,6 +47,7 @@ var methodTools = map[string]string{
 // NewMux 는 Go 1.22+ ServeMux 로 A2A HTTP 라우터를 만든다
 func NewMux(d *dispatch.Dispatcher) *http.ServeMux {
 	mux := http.NewServeMux()
+	monitorSnapshots := &monitorCache{}
 	handleCards := func(w http.ResponseWriter, r *http.Request) {
 		res, err := d.CallTool(r.Context(), "a2a_discover_agents", map[string]any{})
 		if err != nil {
@@ -34,6 +58,15 @@ func NewMux(d *dispatch.Dispatcher) *http.ServeMux {
 	}
 	mux.HandleFunc("GET /.well-known/agent.json", handleCards)
 	mux.HandleFunc("GET /agents", handleCards)
+	mux.HandleFunc("GET /monitor/snapshot", func(w http.ResponseWriter, r *http.Request) {
+		snapshot, err := monitorSnapshots.capture(d, time.Now())
+		if err != nil {
+			log.Printf("monitor snapshot unavailable: %v", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "snapshot unavailable"})
+			return
+		}
+		writeJSON(w, http.StatusOK, snapshot)
+	})
 	mux.HandleFunc("POST /a2a", func(w http.ResponseWriter, r *http.Request) {
 		handlePost(d, w, r)
 	})

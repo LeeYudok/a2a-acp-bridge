@@ -1,6 +1,8 @@
 package board
 
 import (
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -57,5 +59,30 @@ func TestSnapshotIncludesCoordinatorDeepCopy(t *testing.T) {
 	}
 	if again.Coordinator == nil || again.Coordinator.Leader != "agy" || again.Coordinator.ActiveAgents[0] != "agy" {
 		t.Fatalf("Snapshot 사본 수정이 보드에 반영됨: %+v", again.Coordinator)
+	}
+}
+
+func TestSnapshotReadsLegacyCoordinatorWithoutMigration(t *testing.T) {
+	dir := t.TempDir()
+	boardPath := filepath.Join(dir, "a2a_board.json")
+	raw, err := json.Marshal(boardState{Coordinator: &CoordinatorLease{
+		Leader: "agy", Term: 7, LeaseUntil: 100,
+	}})
+	if err != nil {
+		t.Fatalf("legacy board marshal: %v", err)
+	}
+	if err := os.WriteFile(boardPath, raw, 0o600); err != nil {
+		t.Fatalf("legacy board write: %v", err)
+	}
+
+	snap, err := New(boardPath).Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot 실패: %v", err)
+	}
+	if snap.Coordinator == nil || snap.Coordinator.Term != 7 || snap.Coordinator.Leader != "agy" {
+		t.Fatalf("legacy coordinator = %+v", snap.Coordinator)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "coord.json")); !os.IsNotExist(err) {
+		t.Fatalf("Snapshot 이 coord.json 을 만들었습니다: %v", err)
 	}
 }

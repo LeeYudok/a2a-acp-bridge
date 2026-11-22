@@ -10,14 +10,17 @@ type Snapshot struct {
 	Coordinator *CoordinatorLease `json:"coordinator,omitempty"`
 }
 
-// Snapshot 은 현재 보드 상태의 깊은 사본을 반환한다. 저장소를 바꾸지 않는다
+// Snapshot 은 현재 보드 상태의 깊은 사본을 반환한다. 저장소를 바꾸지 않는다.
+// coord.json 이 아직 없을 때 기존 보드의 리스를 읽기만 하며 마이그레이션하지 않는다.
 func (b *Board) Snapshot() (Snapshot, error) {
 	var out Snapshot
+	var legacy *CoordinatorLease
 	err := b.withLock(func() error {
 		st, err := b.load()
 		if err != nil {
 			return err
 		}
+		legacy = cloneCoordinator(st.Coordinator)
 		st.Coordinator = nil
 		raw, err := json.Marshal(normalizeBoardState(st))
 		if err != nil {
@@ -28,6 +31,14 @@ func (b *Board) Snapshot() (Snapshot, error) {
 	if err != nil {
 		return out, err
 	}
-	out.Coordinator, err = b.GetCoordinator()
-	return out, err
+	lease, exists, err := b.loadCoordFile()
+	if err != nil {
+		return out, err
+	}
+	if exists {
+		out.Coordinator = lease
+	} else {
+		out.Coordinator = legacy
+	}
+	return out, nil
 }

@@ -410,7 +410,10 @@ a2a-acp-bridge serve-a2a -addr 127.0.0.1:8765
 | :--- | :--- |
 | `GET /.well-known/agent.json` | A2A 표준 Agent Card(`agy`·`codex`·`claude`), 명명 세션, 최근 태스크 JSON 반환 |
 | `GET /agents` | `/.well-known/agent.json`과 동일 |
+| `GET /monitor/snapshot` | 콘솔용 읽기 전용 모니터링 스냅샷. 에이전트 상태·최근 태스크·명명 세션·지휘권 리스만 반환 |
 | `POST /a2a` | JSON-RPC 2.0 요청 본문을 받아 도구 실행 후 결과 반환 |
+
+`GET /monitor/snapshot`은 보드를 읽기만 한다. 응답에는 태스크 제목, 메시지·프롬프트 본문, `cwd`, 실제 세션 ID를 넣지 않는다. `working` 태스크가 5분 넘게 갱신되지 않으면 `stale`로 표시하고, 최근 태스크 50개와 명명 세션 30개까지만 반환한다. A2A HTTP 서버에는 인증이 없으므로 이 엔드포인트도 기본 주소 `127.0.0.1`에서만 열어 두는 것을 권장한다. 다른 호스트의 콘솔이 접근해야 하면 공인 인터넷에 노출하지 말고 사설 주소·방화벽 범위에서만 허용한다.
 
 `POST /a2a`에서 지원하는 JSON-RPC `method` 매핑:
 
