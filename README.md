@@ -320,6 +320,7 @@ AGY의 상주 ACP 세션에만 적용한다. Codex와 Claude Code는 호출마�
 ```json
 {
   "max_total": 15,
+  "stale_after_seconds": 300,
   "default": {"min": 0, "max": 2},
   "families": {
     "codex-glm": {"min": 1, "max": 3},
@@ -331,9 +332,9 @@ AGY의 상주 ACP 세션에만 적용한다. Codex와 Claude Code는 호출마�
 
 `agents.json`에서 같은 계열의 카드에 같은 `family`를 지정한다. 예를 들어 `codex-glm`과 `codex-glm-2` 카드 모두에 `"family": "codex-glm"`을 넣는다. 생략하면 카드 ID가 계열이다. 별도 Codex 라우트에서 위임을 실행하는 브리지에는 `A2A_CODEX_AGENT_ID`를 등록 카드 ID로 지정하고, 기존 `A2A_CODEX_COMMAND`·`A2A_CODEX_HOME`으로 실행기를 구성한다.
 
-동기·비동기 위임은 같은 보드의 `working` 태스크를 센다. 계열 상한이나 전체 상한에 닿으면 새 태스크를 만들기 전에 오류를 반환한다. 여러 브리지에서 한도를 공유하려면 같은 보드·풀 설정·에이전트 등록 파일을 사용한다. 하한은 상태 표시와 경고에만 쓰이며, 에이전트 프로세스는 운영자가 띄운다. 브리지가 강제 종료되어 `working` 태스크가 남으면 실제 실행이 끝난 것을 확인한 뒤 `a2a_task_status`로 상태를 정리한다.
+동기·비동기 위임은 같은 보드의 최근 `working` 태스크를 센다. 실행 중에는 60초마다 태스크를 갱신한다. 마지막 갱신이 기본 300초 이상 지난 태스크는 슬롯을 차지하지 않는다. 이 기준은 `stale_after_seconds`(최소 120초)로 조절한다. 계열 상한이나 전체 상한에 닿으면 새 태스크를 만들기 전에 오류를 반환한다. 여러 브리지에서 한도를 공유하려면 같은 보드·풀 설정·에이전트 등록 파일을 사용한다. 하한은 상태 표시와 경고에만 쓰이며, 에이전트 프로세스는 운영자가 띄운다. 브리지가 종료되어 갱신이 끊긴 태스크는 상태 응답의 `stale`에 집계한다. 동기 위임이 끝난 뒤 보드 저장이 실패하면 결과에 `board_warning`을 함께 반환한다.
 
-`a2a_pool`과 HTTP `a2a/pool`의 `status`는 계열별 `min`, `max`, `running`, `free_slots`, `below_min`을 반환한다. `free_slots`는 전체 상한도 반영하고, 한도가 없으면 `null`이다. 에이전트 디스커버리와 `/monitor/snapshot`에서는 같은 형식의 `pool` 블록을 제공한다.
+`a2a_pool`과 HTTP `a2a/pool`의 `status`는 계열별 `min`, `max`, `running`, `stale`, `free_slots`, `below_min`을 반환한다. `free_slots`는 전체 상한도 반영하고, 한도가 없으면 `null`이다. 에이전트 디스커버리와 `/monitor/snapshot`에서는 같은 형식의 `pool` 블록을 제공한다.
 
 `set`에는 `family`·`min`·`max`를 함께 전달하거나 `max_total`만 전달한다. `0 ≤ min ≤ max`, `max ≥ 1`, `max_total ≥ 1`이어야 한다.
 

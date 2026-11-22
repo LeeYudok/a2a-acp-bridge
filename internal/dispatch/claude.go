@@ -19,6 +19,7 @@ type ClaudeDelegateResult struct {
 	Response       string  `json:"response"`
 	StopReason     string  `json:"stop_reason,omitempty"`
 	CostUSD        float64 `json:"cost_usd,omitempty"`
+	BoardWarning   string  `json:"board_warning,omitempty"`
 	Async          bool    `json:"async,omitempty"`
 }
 
@@ -70,6 +71,8 @@ func (d *Dispatcher) callDelegateClaude(ctx context.Context, args map[string]any
 }
 
 func (d *Dispatcher) executeClaudeTurn(ctx context.Context, t claudeTurn) (ClaudeDelegateResult, error) {
+	stopHeartbeat := d.keepDelegationAlive(ctx, t.taskID)
+	defer stopHeartbeat()
 	res, err := claude.Run(ctx, t.cwd, t.mode, t.prompt, t.sid)
 	if err != nil {
 		_, _ = d.Board.UpsertTask(t.from, "claude", t.prompt, "failed", t.taskID, t.sid)
@@ -78,8 +81,9 @@ func (d *Dispatcher) executeClaudeTurn(ctx context.Context, t claudeTurn) (Claud
 	if t.sessionName != "" && res.SessionID != "" {
 		_, _ = d.Board.UpsertSession(t.sessionName, "claude", res.SessionID, t.cwd, t.mode, "")
 	}
+	warning := ""
 	if _, err := d.Board.CompleteDelegation("claude", t.from, res.Response, t.taskID, res.SessionID); err != nil {
-		return ClaudeDelegateResult{}, err
+		warning = err.Error()
 	}
 	return ClaudeDelegateResult{
 		Agent:          "claude",
@@ -88,6 +92,7 @@ func (d *Dispatcher) executeClaudeTurn(ctx context.Context, t claudeTurn) (Claud
 		SessionName:    t.sessionName,
 		TaskID:         t.taskID,
 		PermissionMode: t.mode,
+		BoardWarning:   warning,
 		Response:       res.Response,
 		StopReason:     res.StopReason,
 		CostUSD:        res.CostUSD,

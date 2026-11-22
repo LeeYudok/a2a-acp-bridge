@@ -12,14 +12,15 @@ import (
 
 // CodexDelegateResult 는 a2a_delegate_to_codex 응답이다
 type CodexDelegateResult struct {
-	Agent       string   `json:"agent"`
-	Protocol    string   `json:"protocol"`
-	ThreadID    string   `json:"thread_id"`
-	SessionName string   `json:"session_name,omitempty"`
-	TaskID      string   `json:"task_id,omitempty"`
-	Response    string   `json:"response"`
-	AllMessages []string `json:"all_messages"`
-	Async       bool     `json:"async,omitempty"`
+	Agent        string   `json:"agent"`
+	Protocol     string   `json:"protocol"`
+	ThreadID     string   `json:"thread_id"`
+	SessionName  string   `json:"session_name,omitempty"`
+	TaskID       string   `json:"task_id,omitempty"`
+	Response     string   `json:"response"`
+	AllMessages  []string `json:"all_messages"`
+	BoardWarning string   `json:"board_warning,omitempty"`
+	Async        bool     `json:"async,omitempty"`
 }
 
 const codexProtocol = "Codex-JSONL-exec"
@@ -82,6 +83,8 @@ func (d *Dispatcher) callDelegateCodex(ctx context.Context, args map[string]any)
 }
 
 func (d *Dispatcher) executeCodexTurn(ctx context.Context, t codexTurn) (CodexDelegateResult, error) {
+	stopHeartbeat := d.keepDelegationAlive(ctx, t.taskID)
+	defer stopHeartbeat()
 	sandbox := codex.EffectiveSandbox(t.sandbox, t.tid)
 	res, err := codex.Run(ctx, t.cwd, sandbox, t.prompt, t.tid)
 	if err != nil {
@@ -91,16 +94,18 @@ func (d *Dispatcher) executeCodexTurn(ctx context.Context, t codexTurn) (CodexDe
 	if t.sessionName != "" && res.ThreadID != "" {
 		_, _ = d.Board.UpsertSession(t.sessionName, t.target, res.ThreadID, t.cwd, sandbox, "")
 	}
+	warning := ""
 	if _, err := d.Board.CompleteDelegation(t.target, t.from, res.Response, t.taskID, res.ThreadID); err != nil {
-		return CodexDelegateResult{}, err
+		warning = err.Error()
 	}
 	return CodexDelegateResult{
-		Agent:       t.target,
-		Protocol:    codexProtocol,
-		ThreadID:    res.ThreadID,
-		SessionName: t.sessionName,
-		TaskID:      t.taskID,
-		Response:    res.Response,
-		AllMessages: res.AllMessages,
+		Agent:        t.target,
+		Protocol:     codexProtocol,
+		ThreadID:     res.ThreadID,
+		SessionName:  t.sessionName,
+		TaskID:       t.taskID,
+		BoardWarning: warning,
+		Response:     res.Response,
+		AllMessages:  res.AllMessages,
 	}, nil
 }

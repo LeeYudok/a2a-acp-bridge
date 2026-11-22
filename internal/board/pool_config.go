@@ -6,7 +6,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
+
+const DefaultPoolStaleAfter = 5 * time.Minute
+const PoolHeartbeatInterval = time.Minute
 
 type PoolBounds struct {
 	Min int `json:"min"`
@@ -14,9 +18,10 @@ type PoolBounds struct {
 }
 
 type poolConfig struct {
-	MaxTotal *int                  `json:"max_total,omitempty"`
-	Default  *PoolBounds           `json:"default,omitempty"`
-	Families map[string]PoolBounds `json:"families,omitempty"`
+	StaleAfterSeconds *int                  `json:"stale_after_seconds,omitempty"`
+	MaxTotal          *int                  `json:"max_total,omitempty"`
+	Default           *PoolBounds           `json:"default,omitempty"`
+	Families          map[string]PoolBounds `json:"families,omitempty"`
 }
 
 func poolPath() (string, error) {
@@ -46,6 +51,9 @@ func loadPool(path string) (poolConfig, error) {
 }
 
 func (cfg poolConfig) validate() error {
+	if cfg.StaleAfterSeconds != nil && *cfg.StaleAfterSeconds < int(2*PoolHeartbeatInterval/time.Second) {
+		return fmt.Errorf("pool: stale_after_seconds 는 하트비트 주기의 두 배인 120 이상이어야 합니다")
+	}
 	if cfg.MaxTotal != nil && *cfg.MaxTotal < 1 {
 		return fmt.Errorf("pool: max_total 은 1 이상이어야 합니다")
 	}
@@ -99,4 +107,12 @@ func (b *Board) poolConfigPath() (string, error) {
 		}
 	}
 	return path, nil
+}
+
+func (cfg poolConfig) staleCutoff() float64 {
+	seconds := DefaultPoolStaleAfter.Seconds()
+	if cfg.StaleAfterSeconds != nil {
+		seconds = float64(*cfg.StaleAfterSeconds)
+	}
+	return nowSeconds() - seconds
 }

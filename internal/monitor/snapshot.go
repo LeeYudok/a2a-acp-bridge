@@ -12,7 +12,7 @@ import (
 
 const (
 	// DefaultStaleAfter is the point where a working task is reported as stale.
-	DefaultStaleAfter = 5 * time.Minute
+	DefaultStaleAfter = board.DefaultPoolStaleAfter
 	taskLimit         = 50
 	sessionLimit      = 30
 )

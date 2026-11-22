@@ -96,3 +96,38 @@ func TestPoolCoordinatorPermission(t *testing.T) {
 		t.Fatalf("former leader = %v", err)
 	}
 }
+
+func TestPoolStaleTasksAndHeartbeat(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pool.json")
+	t.Setenv("A2A_POOL_FILE", path)
+	if err := os.WriteFile(path, []byte(`{"max_total":1,"stale_after_seconds":120}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	b := New(filepath.Join(dir, "board.json"))
+	old := Task{TaskID: "task-stale", Assignee: "codex", State: "working", UpdatedAt: nowSeconds() - 180}
+	if err := b.save(boardState{Tasks: []Task{old}}); err != nil {
+		t.Fatal(err)
+	}
+	status, err := b.PoolStatus(nil)
+	if err != nil || status.Running != 0 || status.Stale != 1 || status.Families["codex"].Stale != 1 {
+		t.Fatalf("stale status = %+v, %v", status, err)
+	}
+	fresh, err := b.StartDelegation("user", "codex", "next", "", nil)
+	if err != nil {
+		t.Fatalf("stale task blocked delegation: %v", err)
+	}
+	if _, err := b.CompleteDelegation("codex", "user", "done", fresh.TaskID, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.TouchDelegation(old.TaskID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.StartDelegation("user", "codex", "next", "", nil); !errors.Is(err, ErrPoolFull) {
+		t.Fatalf("refreshed task did not occupy its slot: %v", err)
+	}
+	status, err = b.PoolStatus(nil)
+	if err != nil || status.Running != 1 || status.Stale != 0 {
+		t.Fatalf("refreshed status = %+v, %v", status, err)
+	}
+}

@@ -107,5 +107,5 @@ go build -o ~/.local/bin/a2a-acp-bridge ./cmd/a2a-acp-bridge
 
 - `pool.json`(기본 `~/.local/share/a2a-acp-bridge/pool.json`, 재정의 `A2A_POOL_FILE`) 설정 예시는 `{"max_total":15,"default":{"min":0,"max":2},"families":{"codex-glm":{"min":1,"max":3}}}`이다. 파일이 없으면 상한은 무제한이고 하한은 0이다.
 - `agents.json` 카드의 `family`를 계열로 쓰고, 생략하면 ID를 쓴다. 별도 Codex 라우트는 브리지 프로세스의 `A2A_CODEX_AGENT_ID`로 대상 카드를 정한다.
-- 세 위임 도구는 보드 flock 안에서 `working` 태스크를 세고 새 태스크를 기록한다. 같은 풀을 쓰는 프로세스에 같은 보드·풀 설정·에이전트 등록 경로를 지정한다. 하한은 표시와 경고에만 쓰며 에이전트 시작은 운영자가 맡는다.
+- 세 위임 도구는 보드 flock 안에서 최근 `working` 태스크를 세고 새 태스크를 기록한다. 실행 중에는 60초마다 갱신한다. 기본 300초 동안 갱신이 없으면 슬롯을 비우고 `stale`로 표시한다. 같은 풀을 쓰는 프로세스에 같은 보드·풀 설정·에이전트 등록 경로를 지정한다. 하한은 표시와 경고에만 쓰며 에이전트 시작은 운영자가 맡는다.
 - `pool status`나 `a2a_pool`의 `status`로 상태를 본다. 설정 변경 권한과 명령 예시는 [README의 계열별 위임 풀](README.md#55-계열별-위임-풀)을 따른다.

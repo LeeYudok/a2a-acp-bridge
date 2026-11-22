@@ -13,6 +13,7 @@ type PoolFamilyStatus struct {
 	Min       int  `json:"min"`
 	Max       *int `json:"max"`
 	Running   int  `json:"running"`
+	Stale     int  `json:"stale"`
 	FreeSlots *int `json:"free_slots"`
 	BelowMin  bool `json:"below_min"`
 }
@@ -20,6 +21,7 @@ type PoolFamilyStatus struct {
 type PoolStatus struct {
 	MaxTotal  *int                        `json:"max_total"`
 	Running   int                         `json:"running"`
+	Stale     int                         `json:"stale"`
 	FreeSlots *int                        `json:"free_slots"`
 	Families  map[string]PoolFamilyStatus `json:"families"`
 }
@@ -32,14 +34,28 @@ func familyFor(families map[string]string, assignee string) string {
 	return assignee
 }
 
-func runningTasks(tasks []Task, families map[string]string) (map[string]int, int) {
-	counts := make(map[string]int)
-	total := 0
+type poolCounts struct {
+	running int
+	stale   int
+}
+
+func countPoolTasks(tasks []Task, families map[string]string, cutoff float64) (map[string]poolCounts, poolCounts) {
+	counts := make(map[string]poolCounts)
+	var total poolCounts
 	for _, task := range tasks {
-		if task.State == "working" {
-			counts[familyFor(families, task.Assignee)]++
-			total++
+		if task.State != "working" {
+			continue
 		}
+		family := familyFor(families, task.Assignee)
+		count := counts[family]
+		if task.UpdatedAt <= cutoff {
+			count.stale++
+			total.stale++
+		} else {
+			count.running++
+			total.running++
+		}
+		counts[family] = count
 	}
 	return counts, total
 }
@@ -53,26 +69,30 @@ func slots(limit *int, running int) *int {
 }
 
 func (cfg poolConfig) status(tasks []Task, families map[string]string) PoolStatus {
-	counts, total := runningTasks(tasks, families)
+	counts, total := countPoolTasks(tasks, families, cfg.staleCutoff())
 	status := PoolStatus{
-		MaxTotal: cfg.MaxTotal, Running: total, FreeSlots: slots(cfg.MaxTotal, total),
+		MaxTotal: cfg.MaxTotal, Running: total.running, Stale: total.stale, FreeSlots: slots(cfg.MaxTotal, total.running),
 		Families: make(map[string]PoolFamilyStatus),
 	}
 	for _, family := range families {
-		counts[family] += 0
+		if _, ok := counts[family]; !ok {
+			counts[family] = poolCounts{}
+		}
 	}
 	for family := range cfg.Families {
-		counts[family] += 0
+		if _, ok := counts[family]; !ok {
+			counts[family] = poolCounts{}
+		}
 	}
-	for family, running := range counts {
-		entry := PoolFamilyStatus{Running: running, FreeSlots: status.FreeSlots}
+	for family, count := range counts {
+		entry := PoolFamilyStatus{Running: count.running, Stale: count.stale, FreeSlots: status.FreeSlots}
 		if bounds := cfg.bounds(family); bounds != nil {
 			entry.Min, entry.Max = bounds.Min, &bounds.Max
-			entry.FreeSlots = slots(entry.Max, running)
+			entry.FreeSlots = slots(entry.Max, count.running)
 			if status.FreeSlots != nil && *status.FreeSlots < *entry.FreeSlots {
 				entry.FreeSlots = status.FreeSlots
 			}
-			entry.BelowMin = running < bounds.Min
+			entry.BelowMin = count.running < bounds.Min
 		}
 		status.Families[family] = entry
 	}
@@ -94,12 +114,12 @@ func (b *Board) StartDelegation(from, to, prompt, session string, families map[s
 	var msg Message
 	err := b.withPoolState(func(_ string, cfg poolConfig, st *boardState) error {
 		family := familyFor(families, to)
-		counts, total := runningTasks(st.Tasks, families)
-		if bounds := cfg.bounds(family); bounds != nil && counts[family] >= bounds.Max {
-			return fmt.Errorf("%w: family=%s running=%d max=%d", ErrPoolFull, family, counts[family], bounds.Max)
+		counts, total := countPoolTasks(st.Tasks, families, cfg.staleCutoff())
+		if bounds := cfg.bounds(family); bounds != nil && counts[family].running >= bounds.Max {
+			return fmt.Errorf("%w: family=%s running=%d max=%d", ErrPoolFull, family, counts[family].running, bounds.Max)
 		}
-		if cfg.MaxTotal != nil && total >= *cfg.MaxTotal {
-			return fmt.Errorf("%w: family=%s total_running=%d max_total=%d", ErrPoolFull, family, total, *cfg.MaxTotal)
+		if cfg.MaxTotal != nil && total.running >= *cfg.MaxTotal {
+			return fmt.Errorf("%w: family=%s total_running=%d max_total=%d", ErrPoolFull, family, total.running, *cfg.MaxTotal)
 		}
 		var err error
 		msg, err = addMessage(st, from, to, prompt, "delegate", "", "working", session)
@@ -189,5 +209,22 @@ func (b *Board) withPoolState(fn func(string, poolConfig, *boardState) error) er
 			return err
 		}
 		return fn(path, cfg, &st)
+	})
+}
+
+// TouchDelegation refreshes a working task without changing its state.
+func (b *Board) TouchDelegation(taskID string) error {
+	return b.withLock(func() error {
+		st, err := b.load()
+		if err != nil {
+			return err
+		}
+		for i := range st.Tasks {
+			if st.Tasks[i].TaskID == taskID && st.Tasks[i].State == "working" {
+				st.Tasks[i].UpdatedAt = nowSeconds()
+				return b.save(st)
+			}
+		}
+		return nil
 	})
 }
