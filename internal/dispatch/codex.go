@@ -27,11 +27,17 @@ type codexTurn struct {
 func (d *Dispatcher) callDelegateCodex(ctx context.Context, args map[string]any) (CodexDelegateResult, error) {
 	sessionName := strArg(args, "session_name", "")
 	tid, cwd := d.resolveAgentSession("codex", args, "thread_id")
+	sandbox := strArg(args, "sandbox", "")
+	if sandbox == "" && sessionName != "" {
+		if rec, err := d.Board.ResolveSession(sessionName, "codex"); err == nil {
+			sandbox = rec.Mode
+		}
+	}
 	turn := codexTurn{
 		from:        d.caller(args),
 		cwd:         cwd,
 		tid:         tid,
-		sandbox:     strArg(args, "sandbox", ""),
+		sandbox:     sandbox,
 		prompt:      strArg(args, "prompt", ""),
 		sessionName: sessionName,
 	}
@@ -64,13 +70,14 @@ func (d *Dispatcher) callDelegateCodex(ctx context.Context, args map[string]any)
 }
 
 func (d *Dispatcher) executeCodexTurn(ctx context.Context, t codexTurn) (CodexDelegateResult, error) {
-	res, err := codex.Run(ctx, t.cwd, t.sandbox, t.prompt, t.tid)
+	sandbox := codex.EffectiveSandbox(t.sandbox, t.tid)
+	res, err := codex.Run(ctx, t.cwd, sandbox, t.prompt, t.tid)
 	if err != nil {
 		_, _ = d.Board.UpsertTask(t.from, "codex", t.prompt, "failed", t.taskID, t.tid)
 		return CodexDelegateResult{}, err
 	}
 	if t.sessionName != "" && res.ThreadID != "" {
-		_, _ = d.Board.UpsertSession(t.sessionName, "codex", res.ThreadID, t.cwd, "", "")
+		_, _ = d.Board.UpsertSession(t.sessionName, "codex", res.ThreadID, t.cwd, sandbox, "")
 	}
 	_, _ = d.Board.SendMessage("codex", t.from, res.Response, "reply", t.taskID)
 	_, _ = d.Board.UpsertTask(t.from, "codex", t.prompt, "completed", t.taskID, res.ThreadID)

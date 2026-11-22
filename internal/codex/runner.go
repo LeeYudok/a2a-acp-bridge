@@ -71,7 +71,7 @@ func ParseJSONL(stdout, initialThreadID string) (string, []string, error) {
 // Run 은 Codex 에 프롬프트를 보낸다. threadID 가 있으면 그 스레드를 이어간다.
 // 개인 게이트가 사용자 확인을 요구하면 같은 스레드에서 한 번 더 답한다.
 func Run(ctx context.Context, cwd, sandbox, promptText, threadID string) (Result, error) {
-	sandbox = effectiveSandbox(sandbox, threadID)
+	sandbox = EffectiveSandbox(sandbox, threadID)
 	tid, msgs, err := runOnce(ctx, cwd, sandbox, promptText, threadID)
 	if err != nil {
 		return Result{}, err
@@ -97,7 +97,7 @@ func lastMessage(msgs []string) string {
 }
 
 func runOnce(ctx context.Context, cwd, sandbox, promptText, threadID string) (string, []string, error) {
-	sandbox = effectiveSandbox(sandbox, threadID)
+	sandbox = EffectiveSandbox(sandbox, threadID)
 	var args []string
 	if threadID != "" {
 		args = []string{"-s", sandbox, "exec", "resume", "--skip-git-repo-check", "--json", threadID, promptText}
@@ -132,9 +132,9 @@ func runOnce(ctx context.Context, cwd, sandbox, promptText, threadID string) (st
 	return tid, msgs, nil
 }
 
-// effectiveSandbox 는 생략된 샌드박스 정책을 정한다. Codex 0.170.0의 resume은
+// EffectiveSandbox 는 생략된 샌드박스 정책을 정한다. Codex 0.170.0의 resume은
 // 기존 스레드 정책을 복원하지 않고 현재 설정을 다시 적용하므로, 재개는 읽기 전용을 기본으로 둔다.
-func effectiveSandbox(sandbox, threadID string) string {
+func EffectiveSandbox(sandbox, threadID string) string {
 	if sandbox != "" {
 		return sandbox
 	}

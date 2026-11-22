@@ -2,11 +2,12 @@ package board
 
 import "encoding/json"
 
-// Snapshot 은 보드 전체(태스크·메시지·세션)의 깊은 사본이다
+// Snapshot 은 보드 전체(태스크·메시지·세션·지휘권 리스)의 깊은 사본이다
 type Snapshot struct {
-	Tasks    []Task         `json:"tasks"`
-	Messages []Message      `json:"messages"`
-	Sessions []NamedSession `json:"sessions"`
+	Tasks       []Task            `json:"tasks"`
+	Messages    []Message         `json:"messages"`
+	Sessions    []NamedSession    `json:"sessions"`
+	Coordinator *CoordinatorLease `json:"coordinator,omitempty"`
 }
 
 // Snapshot 은 현재 보드 상태의 깊은 사본을 반환한다. 저장소를 바꾸지 않는다

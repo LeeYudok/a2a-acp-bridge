@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"slices"
 	"time"
 
 	"github.com/LeeYudok/a2a-acp-bridge/internal/board"
@@ -16,14 +17,15 @@ import (
 const defaultWatchInterval = 1 * time.Second
 
 type watchEvent struct {
-	Type      string `json:"type"`
-	Op        string `json:"op"`
-	MessageID string `json:"message_id,omitempty"`
-	FromAgent string `json:"from_agent,omitempty"`
-	ToAgent   string `json:"to_agent,omitempty"`
-	TaskID    string `json:"task_id,omitempty"`
-	State     string `json:"state,omitempty"`
-	Content   string `json:"content,omitempty"`
+	Type        string                  `json:"type"`
+	Op          string                  `json:"op"`
+	MessageID   string                  `json:"message_id,omitempty"`
+	FromAgent   string                  `json:"from_agent,omitempty"`
+	ToAgent     string                  `json:"to_agent,omitempty"`
+	TaskID      string                  `json:"task_id,omitempty"`
+	State       string                  `json:"state,omitempty"`
+	Content     string                  `json:"content,omitempty"`
+	Coordinator *board.CoordinatorLease `json:"coordinator,omitempty"`
 }
 
 func runWatchCmd(ctx context.Context, d *dispatch.Dispatcher, rest []string) error {
@@ -101,14 +103,14 @@ func diffBoard(prev, cur board.Snapshot, agent string, all bool) []watchEvent {
 		if !relevant {
 			continue
 		}
-		switch {
-		case !seen:
+		if !seen {
 			out = append(out, watchEvent{
 				Type: "message", Op: "new", MessageID: m.MessageID,
 				FromAgent: m.FromAgent, ToAgent: m.ToAgent,
 				TaskID: m.TaskID, Content: m.Content,
 			})
-		case m.ReadAt > 0 && old.ReadAt == 0:
+		}
+		if m.ReadAt > 0 && (!seen || old.ReadAt == 0) {
 			out = append(out, watchEvent{
 				Type: "message", Op: "read", MessageID: m.MessageID,
 				FromAgent: m.FromAgent, ToAgent: m.ToAgent, TaskID: m.TaskID,
@@ -130,5 +132,58 @@ func diffBoard(prev, cur board.Snapshot, agent string, all bool) []watchEvent {
 			FromAgent: t.Creator, ToAgent: t.Assignee, State: t.State, Content: t.Title,
 		})
 	}
+	if ev, ok := diffCoordinator(prev.Coordinator, cur.Coordinator, agent, all); ok {
+		out = append(out, ev)
+	}
 	return out
+}
+
+func diffCoordinator(prev, cur *board.CoordinatorLease, agent string, all bool) (watchEvent, bool) {
+	if coordinatorEqual(prev, cur) {
+		return watchEvent{}, false
+	}
+	if !all && !coordinatorRelevant(prev, agent) && !coordinatorRelevant(cur, agent) {
+		return watchEvent{}, false
+	}
+	ev := watchEvent{Type: "coordinator", Op: "state"}
+	if prev != nil {
+		ev.FromAgent = prev.Leader
+	}
+	if cur != nil {
+		copied := *cur
+		copied.ActiveAgents = append([]string(nil), cur.ActiveAgents...)
+		ev.ToAgent = copied.Leader
+		ev.Content = copied.Reason
+		ev.Coordinator = &copied
+	}
+	return ev, true
+}
+
+func coordinatorEqual(a, b *board.CoordinatorLease) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return a.Leader == b.Leader &&
+		a.Term == b.Term &&
+		a.LeaseUntil == b.LeaseUntil &&
+		a.UpdatedAt == b.UpdatedAt &&
+		a.PreviousLeader == b.PreviousLeader &&
+		a.Reason == b.Reason &&
+		a.HandedOffTo == b.HandedOffTo &&
+		slices.Equal(a.ActiveAgents, b.ActiveAgents)
+}
+
+func coordinatorRelevant(lease *board.CoordinatorLease, agent string) bool {
+	if lease == nil {
+		return false
+	}
+	if lease.Leader == agent || lease.PreviousLeader == agent || lease.HandedOffTo == agent {
+		return true
+	}
+	for _, active := range lease.ActiveAgents {
+		if active == agent {
+			return true
+		}
+	}
+	return false
 }
