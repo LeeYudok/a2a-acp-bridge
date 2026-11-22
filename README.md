@@ -319,7 +319,7 @@ AGY의 상주 ACP 세션에만 적용한다. Codex와 Claude Code는 호출마�
 
 ```json
 {
-  "max_total": 8,
+  "max_total": 15,
   "default": {"min": 0, "max": 2},
   "families": {
     "codex-glm": {"min": 1, "max": 3},
@@ -340,7 +340,7 @@ AGY의 상주 ACP 세션에만 적용한다. Codex와 Claude Code는 호출마�
 ```sh
 a2a-acp-bridge pool status
 a2a-acp-bridge pool set codex-glm --min 1 --max 3
-a2a-acp-bridge pool set --max-total 8
+a2a-acp-bridge pool set --max-total 15
 ```
 
 로컬 CLI 변경은 기본적으로 `user` 권한을 쓴다. `A2A_AGENT_ID`를 지정한 CLI와 MCP 서버는 해당 ID가 `user`이거나 활성 지휘권 리스의 보유자일 때 변경할 수 있다. MCP의 클라이언트 이름과 요청의 발신자 필드는 변경 권한에 영향을 주지 않는다. HTTP 변경은 `A2A_POOL_WRITE_TOKEN`과 일치하는 `Authorization: Bearer …` 헤더가 있을 때 `user` 권한으로 처리한다.
