@@ -214,20 +214,21 @@ MCP stdio 스트림이 깨지지 않도록 `ssh -q -o LogLevel=ERROR` 옵션을 
 
 ## 5. MCP 도구 상세 명세
 
-MCP 서버(`a2a-acp-bridge mcp`)는 아래 8개 도구를 노출한다(2026-11-22 기준).
+MCP 서버(`a2a-acp-bridge mcp`)는 아래 9개 도구를 노출한다(2026-11-22 기준, main `6c6d655`).
 
 | 도구 이름 | 언제 쓰나 | 필수 인자 | 선택 인자 |
 | :--- | :--- | :--- | :--- |
-| `a2a_discover_agents` | 사용 가능한 에이전트 카드(`agy`·`codex`·`claude`), 열린 명명 세션, 최근 태스크 10건을 확인할 때 | 없음 | 없음 |
+| `a2a_discover_agents` | 사용 가능한 에이전트 카드(내장 `agy`·`codex`·`claude` + `agents.json` 동적 에이전트), 열린 명명 세션, 최근 태스크 10건을 확인할 때 | 없음 | 없음 |
+| `a2a_coordinator_lease` | 지휘권 리스를 조회·선점·갱신·이양할 때 (`action`: `status`/`claim`/`renew`/`handoff`) | `action` | `agent_id`, `expected_term`, `ttl_seconds`, `force`, `reason`, `to_agent`, `active_agents` |
 | `acp_delegate_to_agy` | AGY(`agy acp`)에게 코드 작성·분석·리팩터링을 맡길 때 | `prompt` | `session_name`, `session_id`, `mode`, `model`, `async`, `cwd`, `from_agent` |
 | `a2a_delegate_to_codex` | Codex(`codex exec`)에게 교차 코드 리뷰나 비대화형 작업을 맡길 때 | `prompt` | `session_name`, `thread_id`, `sandbox`, `async`, `cwd`, `from_agent` |
 | `a2a_delegate_to_claude` | Claude Code(`claude -p`)에게 교차 리뷰나 분석을 맡길 때 | `prompt` | `session_name`, `session_id`, `permission_mode`, `async`, `cwd`, `from_agent` |
 | `acp_session_control` | 상주 AGY 세션 상태를 보거나 실행 중 취소·모드 변경·모델 변경·종료할 때 | `action` | `session`, `mode`, `model`, `cwd` |
 | `a2a_send_message` | 에이전트 직접 실행 없이 공유 보드에 메시지·태스크만 남길 때 (`intent`: `delegate`/`review`/`reply`/`chat`/`sync`) | `to_agent`, `content` | `from_agent`, `intent`, `task_id` |
-| `a2a_receive_messages` | 특정 발신자·에이전트(`agy`·`codex`·`claude`·`user`) 앞으로 온 메시지를 읽을 때 | `agent_id` | `unread_only`, `mark_read` |
+| `a2a_receive_messages` | 특정 에이전트(내장·동적 에이전트 또는 `user`) 앞으로 온 메시지를 읽을 때. `mark_read: false` 면 읽음 처리하지 않는다 | `agent_id` | `unread_only`, `mark_read` |
 | `a2a_task_status` | 특정 `task_id`의 진행 상태와 대화 내역을 조회하거나 상태를 바꿀 때 (`state`: `submitted`/`working`/`input-required`/`completed`/`failed`) | 없음 | `task_id`, `state` |
 
-`from_agent`는 `agy`, `codex`, `claude`, `user` 중 하나다. 생략하면 2.4절의 순서로 정한다. `a2a_send_message`의 `to_agent`는 `agy`, `codex`, `claude` 중 하나다. `a2a_task_status`는 `task_id`를 생략하면 최근 태스크 20건을 돌려준다.
+`from_agent`는 등록된 에이전트 ID(내장 `agy`·`codex`·`claude`와 `agents.json` 의 동적 에이전트) 또는 `user` 다. 생략하면 2.4절의 순서로 정한다. `a2a_send_message`의 `to_agent`는 등록된 에이전트 ID 중 하나다. 동적 에이전트는 `A2A_AGENTS_FILE`(기본 `~/.local/share/a2a-acp-bridge/agents.json`)에 소문자 slug(`^[a-z0-9][a-z0-9-]{0,23}$`)로 추가한다. 파일이 깨져 있으면 경고 없이 동적 에이전트가 빠지니 `cards` 로 확인한다(#20). `a2a_task_status`는 `task_id`를 생략하면 최근 태스크 20건을 돌려준다.
 
 ### 5.1 `acp_delegate_to_agy` 호출 및 응답 예
 
@@ -285,7 +286,19 @@ MCP 서버(`a2a-acp-bridge mcp`)는 아래 8개 도구를 노출한다(2026-11-2
 
 `async: true`이면 `async: true`, `task_id`와 빈 `response`를 즉시 돌려준다. 결과는 `a2a_task_status`나 호출자 수신함(`reply`)에서 읽는다. Codex 응답(`a2a_delegate_to_codex`)은 `session_id` 대신 `thread_id`를 주고, 모든 `agent_message`를 `all_messages`로 함께 준다.
 
-### 5.3 `acp_session_control` 동작(`action`) 목록
+### 5.3 `a2a_coordinator_lease` 지휘권 리스
+
+여러 에이전트 중 한 명만 지휘자(오케스트레이터)를 맡도록 보드에 `term`·`lease_until` 리스를 둔다. 모든 변경은 보드 flock 아래에서 `expected_term` 을 비교(CAS)한 뒤에만 반영된다.
+
+- `status`: 현재 리스를 돌려준다. 리스가 없으면 `coordinator: null` 이다.
+- `claim`: `expected_term` 이 현재 term 과 같을 때만 `term + 1` 로 선점한다. 활성 리스를 만료 전에 가져오려면 `force` 와 `reason` 이 함께 필요하다.
+- `renew`: 현재 지휘자만 `ttl_seconds`(CLI `-ttl`, 기본 60분)만큼 연장한다.
+- `handoff`: 현재 지휘자가 `to_agent` 에게 넘긴다. `to_agent` 를 비우면 누구나 claim 할 수 있는 개방 이양이 된다.
+- 실패 사유: term 불일치, 활성 리스, 만료된 리스 갱신·이양, 개방 이양 상태 재이양, 지휘자 아님, 사유 없는 force, 잘못된 에이전트 ID.
+
+주의: #16 이전 바이너리로 떠 있는 브리지 프로세스가 보드에 쓰면 리스 필드가 지워진다(#20). 바이너리를 바꾼 뒤에는 각 에이전트의 MCP 서버를 포함해 모든 브리지 프로세스를 다시 띄운다. 호출자를 식별하지 못해 `user` 로 떨어진 프로세스끼리는 상호배제가 보장되지 않으니 `A2A_AGENT_ID` 나 `-agent` 를 준다.
+
+### 5.4 `acp_session_control` 동작(`action`) 목록
 
 AGY의 상주 ACP 세션에만 적용한다. Codex와 Claude Code는 호출마다 프로세스를 새로 띄우므로 해당하지 않는다.
 
@@ -356,7 +369,7 @@ a2a-acp-bridge inbox claude
 # 발신자를 밝히지 않으면 user 수신함으로 돌아온다
 a2a-acp-bridge inbox user
 
-# 10. 공유 보드 폴링 감시 (새 메시지·읽음·태스크 상태 변화를 JSON 이벤트로 출력)
+# 10. 공유 보드 폴링 감시 (새 메시지·읽음·태스크 상태·지휘권 리스 변화를 JSON 이벤트로 출력)
 a2a-acp-bridge watch
 a2a-acp-bridge watch -agent codex -interval 2s -timeout 5m
 a2a-acp-bridge watch -all
@@ -372,16 +385,17 @@ a2a-acp-bridge serve-a2a -addr 127.0.0.1:8765
 | 서브커맨드 | 플래그 |
 | :--- | :--- |
 | `ask-agy` | `-s`, `-session-id`, `-mode`(`auto`·`accept-edits`·`plan`), `-model`, `-no-wait`, `-cwd`, `-timeout`, `-from` |
-| `ask-codex` | `-s`, `-thread-id`, `-sandbox`(`read-only`·`workspace-write`, 새 실행 기본 `workspace-write`, 재개 기본 `read-only`), `-no-wait`, `-cwd`, `-timeout`, `-from` |
+| `ask-codex` | `-s`, `-thread-id`, `-sandbox`(`read-only`·`workspace-write`, 새 실행 기본 `workspace-write`, 재개 기본 `read-only`, `-s` 명명 세션은 저장된 sandbox 재사용), `-no-wait`, `-cwd`, `-timeout`, `-from` |
 | `ask-claude` | `-s`, `-session-id`, `-permission-mode`(`plan`·`default`·`acceptEdits`, 기본 `plan`), `-no-wait`, `-cwd`, `-timeout`, `-from` |
 | `agy-sessions` | `-cursor`, `-cwd`, `-timeout` |
 | `sessions`·`cancel`·`set-mode`·`set-model`·`close` | `-s`(또는 첫 위치 인자), `-mode`, `-model`, `-cwd`, `-timeout` |
 | `send` | `-from`, `-to`(기본 `codex`), `-intent`(기본 `delegate`), `-task-id` |
-| `inbox` | `-all`(읽은 메시지 포함), 위치 인자로 `agy`·`codex`·`claude`·`user` |
+| `inbox` | `-all`(읽은 메시지 포함), `-peek`(읽음 처리하지 않음), 위치 인자로 에이전트 ID 또는 `user` |
+| `coord` | 위치 인자 `status`·`claim`·`renew`·`handoff`, `-agent`(기본 `A2A_AGENT_ID` 또는 `user`), `-expected-term`(CAS 용 현재 term), `-ttl`(기본 60분), `-force`(만료 전 강제 승계, `-reason` 필요), `-reason`, `-to`(handoff 대상, 비우면 개방 이양), `-agents`(활성 에이전트 목록, 쉼표 구분) |
 | `watch` | `-agent`(기본 `A2A_AGENT_ID` 또는 `user`), `-interval`(기본 `1s`), `-all`, `-timeout`(기본 `0`, 종료 시그널까지) |
 | `serve-a2a` | `-addr`(기본 `127.0.0.1:8765`) |
 
-`-from`의 값은 `agy`, `codex`, `claude`, `user` 중 하나다. 없으면 `A2A_AGENT_ID`, 그것도 없으면 `user`로 기록한다. `-no-wait`는 결과 JSON을 즉시 출력하지만, CLI 프로세스는 백그라운드 작업이 끝날 때까지 종료하지 않는다. 백그라운드 작업에도 `-timeout` 이 적용된다(MCP 서버의 async 작업은 상한 없음). `-cwd` 를 주지 않고 `-s` 로 명명 세션을 이어가면 그 세션을 만든 디렉터리에서 실행한다. Claude Code·ACP 세션은 프로젝트 디렉터리에 묶여 있어 다른 디렉터리에서는 이어지지 않기 때문이다. `inbox`는 조회한 메시지를 읽음 처리한다(`-all`을 줘도 같다). `watch`는 보드를 폴링해서 관련 에이전트(또는 `-all`)의 새 메시지(`type: message`, `op: new`), 읽음(`op: read`), 태스크 상태 변화(`type: task`)를 JSON 이벤트 한 줄씩 출력하고, 저장소를 바꾸지 않는다.
+`-from`의 값은 등록된 에이전트 ID(내장 `agy`·`codex`·`claude`와 `agents.json` 의 동적 에이전트) 또는 `user` 다. 없으면 `A2A_AGENT_ID`, 그것도 없으면 `user`로 기록한다. `-no-wait`는 결과 JSON을 즉시 출력하지만, CLI 프로세스는 백그라운드 작업이 끝날 때까지 종료하지 않는다. 백그라운드 작업에도 `-timeout` 이 적용된다(MCP 서버의 async 작업은 상한 없음). `-cwd` 를 주지 않고 `-s` 로 명명 세션을 이어가면 그 세션을 만든 디렉터리에서 실행한다. Claude Code·ACP 세션은 프로젝트 디렉터리에 묶여 있어 다른 디렉터리에서는 이어지지 않기 때문이다. `inbox`는 조회한 메시지를 읽음 처리한다(`-all`을 줘도 같다). 남의 수신함을 확인만 할 때는 `-peek` 을 쓴다. `watch`는 보드를 폴링해서 관련 에이전트(또는 `-all`)의 새 메시지(`type: message`, `op: new`), 읽음(`op: read`), 태스크 상태 변화(`type: task`), 지휘권 리스 변화(`type: coordinator`, `op: state`)를 JSON 이벤트 한 줄씩 출력하고, 저장소를 바꾸지 않는다. 리스 이벤트는 `from_agent`(직전 리더)·`to_agent`(현 리더)·`content`(사유)와 리스 전체(`coordinator`)를 담고, 리더·직전 리더·이양 대상·`active_agents` 에 든 에이전트(또는 `-all`)에게 나온다. `coord renew` 로 만료 시각만 바뀌어도 나온다. 한 주기 안에 생성과 읽음이 함께 일어나면 `op: new` 와 `op: read` 가 둘 다 나온다. 다만 폴링이라 한 주기 안의 태스크 중간 상태와 리스 중간 변화는 건너뛰고 마지막 상태만 보인다(#21).
 
 ---
 
@@ -430,7 +444,8 @@ curl -s http://127.0.0.1:8765/a2a \
 | `A2A_CODEX_COMMAND` | `codex` | Codex 위임 시 실행할 바이너리 명령 재정의. 공백으로 나눈 첫 토큰이 실행 파일이고 나머지는 인자 앞에 붙는다 |
 | `A2A_CODEX_HOME` | (없음) | Codex 자식 프로세스에만 적용할 `CODEX_HOME`. DeepSeek Codex에서 정식 Codex처럼 다른 홈의 Codex를 호출할 때 지정한다 |
 | `A2A_CLAUDE_COMMAND` | `claude` | Claude Code 위임 시 실행할 바이너리 명령 재정의. 규칙은 `A2A_CODEX_COMMAND`와 같다 |
-| `A2A_AGENT_ID` | (없음) | 이 프로세스를 부르는 에이전트 ID(`agy`·`codex`·`claude`). 위임·`send` 에 `from_agent`·`-from` 이 없으면 이 값을 발신자로 기록하고, 이것도 없으면 `user` 로 기록한다. MCP 서버는 이 값이 비어 있을 때만 initialize 의 `clientInfo.name` 으로 발신자를 추정한다 |
+| `A2A_AGENTS_FILE` | `~/.local/share/a2a-acp-bridge/agents.json` | 내장 3종 외에 참여할 동적 에이전트 정의 파일. 같은 ID 면 내장 카드를 덮어쓴다 |
+| `A2A_AGENT_ID` | (없음) | 이 프로세스를 부르는 에이전트 ID(내장·동적 에이전트 slug). 위임·`send` 에 `from_agent`·`-from` 이 없으면 이 값을 발신자로 기록하고, 이것도 없으면 `user` 로 기록한다. MCP 서버는 이 값이 비어 있을 때만 initialize 의 `clientInfo.name` 으로 발신자를 추정한다 |
 
 보드 저장소(`a2a_board.json`)는 프로세스 내부 뮤텍스와 OS 파일 락(`a2a_board.json.lock`, `flock`)으로 다중 프로세스 동시 쓰기를 직렬화한다. `flock`은 Linux, macOS, BSD 계열에서 동작한다. 그 밖의 OS에서는 프로세스 내부 뮤텍스만 쓴다. 같은 디렉터리에 `os.CreateTemp`로 고유 임시 파일을 만들고 권한 `0600`으로 쓴 뒤 `os.Rename`으로 원자적 교체한다. 에이전트 셋이 각자 `mcp` 프로세스를 띄워 같은 보드를 써도 안전하다. 단 PR #6 이전 빌드는 임시 파일 경로가 고정이라 동시에 쓰면 rename이 실패하므로 그 이후 빌드를 쓴다.
 

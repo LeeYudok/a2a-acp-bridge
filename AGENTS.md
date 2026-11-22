@@ -8,14 +8,14 @@
 
 | 패키지 | 책임 |
 |---|---|
-| `internal/cli` | 서브커맨드·플래그 |
-| `internal/dispatch` | 도구 스키마(`Tools`)와 도구 이름 → acp·codex·board 라우팅, 발신자(`Caller`·`from_agent`) |
+| `internal/cli` | 서브커맨드·플래그, `watch`(보드 폴링)·`coord`(지휘권 리스) |
+| `internal/dispatch` | 도구 스키마(`Tools`)와 도구 이름 → acp·codex·claude·board 라우팅, 발신자(`Caller`·`from_agent`), 지휘권 리스 도구 |
 | `internal/acp` | ACP 프로토콜, 상주 워커, 세션 풀, `session/list` |
 | `internal/acp/acptest` | 테스트용 모의 ACP 에이전트 |
 | `internal/codex` | `codex exec` 러너 |
 | `internal/claude` | `claude -p --output-format json` 러너(Claude Code 위임) |
-| `internal/board` | 공유 보드(태스크·메시지·명명 세션), flock + 임시 파일 원자 저장 |
-| `internal/agents` | Agent Card, 에이전트 레지스트리 |
+| `internal/board` | 공유 보드(태스크·메시지·명명 세션·지휘권 리스·스냅샷), flock + 임시 파일 원자 저장 |
+| `internal/agents` | Agent Card, 내장·동적(`agents.json`) 에이전트 레지스트리, MCP clientInfo 추정 |
 | `internal/mcp`, `internal/a2a` | MCP stdio 서버, A2A HTTP 서버 |
 | `internal/jsonrpc`, `internal/gate` | 공용 JSON-RPC 요청 타입, 개인 게이트 감지 |
 
@@ -89,9 +89,10 @@ go build -o ~/.local/bin/a2a-acp-bridge ./cmd/a2a-acp-bridge
 - 발신자를 밝힌다: `A2A_AGENT_ID=<나>` 를 두거나 `-from <나>` 를 준다. 없으면 보드에 `user` 로 기록된다.
 - 받는 쪽 수신함: `a2a-acp-bridge inbox [-peek] <agy|codex|claude|user|<agent_id>>` (`-peek` 은 읽음 표시 없이 조회한다).
 - 서로 다른 `CODEX_HOME` 을 쓰는 Codex끼리는 `A2A_CODEX_HOME` 으로 대상 Codex 홈을 고정한다. 이 값은 브리지가 실행하는 `codex exec` 자식에만 적용된다.
-- 실시간 변화 감시: `a2a-acp-bridge watch`(기본 1초 폴링, `-interval`·`-agent`·`-all`·`-timeout`). 새 메시지·읽음·태스크 상태 변화를 JSON 이벤트 한 줄로 출력한다.
+- 실시간 변화 감시: `a2a-acp-bridge watch`(기본 1초 폴링, `-interval`·`-agent`·`-all`·`-timeout`). 새 메시지·읽음·태스크 상태·지휘권 리스 변화를 JSON 이벤트 한 줄로 출력한다. 폴링이라 한 주기 안의 중간 상태는 건너뛴다.
 - 서로에게 일을 맡길 때: `ask-agy`·`ask-codex`·`ask-claude`(Claude 는 기본 `-permission-mode plan`, 수정까지 맡길 땐 `acceptEdits`). 응답은 발신자 수신함에도 남는다.
 - 브리지 프로세스를 여러 개 동시에 띄울 때는 PR #6 이후 바이너리를 쓴다. 그 이전 바이너리는 보드 `.tmp` 경로가 고정이라 동시에 쓰면 rename 이 실패한다.
+- 바이너리를 바꾸면 각 에이전트의 MCP 서버(`a2a-acp-bridge mcp`)까지 모든 브리지 프로세스를 다시 띄운다. PR #16 이전 프로세스가 보드에 쓰면 지휘권 리스가 지워진다(#20).
 - 할당량·토큰 한도에 걸리면 이슈 #8 이나 담당 이슈에 "언제까지 불가" 를 남긴다. 남은 에이전트는 그 사이 그 에이전트 담당 작업을 위 3절대로 처리한다.
 
 ### 5. 오케스트레이터 지휘권 승계(Failover) 및 다중 에이전트(N-agent) 확장
