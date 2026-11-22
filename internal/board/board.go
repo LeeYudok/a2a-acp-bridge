@@ -1,5 +1,5 @@
-// Package board 는 에이전트가 함께 쓰는 파일 기반 A2A 보드(태스크·메시지·명명 세션·지휘권 리스)다.
-// 프로세스 내부 뮤텍스와 OS 파일 락을 함께 잡고, 임시 파일 교체로 원자 저장한다.
+// Package board 는 에이전트가 함께 쓰는 파일 기반 A2A 보드(태스크·메시지·명명 세션)와 지휘권 리스를 관리한다.
+// 보드와 coord.json은 파일별 뮤텍스·OS 락을 잡고, 임시 파일 교체로 원자 저장한다.
 package board
 
 import (
@@ -62,16 +62,19 @@ type NamedSession struct {
 }
 
 type boardState struct {
-	Tasks       []Task            `json:"tasks"`
-	Messages    []Message         `json:"messages"`
-	Sessions    []NamedSession    `json:"sessions"`
+	Tasks    []Task         `json:"tasks"`
+	Messages []Message      `json:"messages"`
+	Sessions []NamedSession `json:"sessions"`
+
+	// Coordinator 는 #20 이전 보드에 남은 리스를 읽기 위한 필드다. save 는 이 값을 쓰지 않는다.
 	Coordinator *CoordinatorLease `json:"coordinator,omitempty"`
 }
 
-// Board 는 파일 기반 A2A 공유 태스크·메시지·세션·지휘권 저장소다
+// Board 는 파일 기반 A2A 공유 태스크·메시지·세션 저장소다
 type Board struct {
-	mu   sync.Mutex
-	path string
+	mu      sync.Mutex
+	coordMu sync.Mutex
+	path    string
 }
 
 // DefaultPath 는 기본 보드 저장 경로를 반환한다. A2A_BRIDGE_STORE 가 있으면 그 값을 쓴다

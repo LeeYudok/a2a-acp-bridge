@@ -22,12 +22,13 @@ type Card struct {
 
 // Discovery 는 a2a_discover_agents 도구와 /.well-known/agent.json 의 응답이다
 type Discovery struct {
-	Protocol    string                  `json:"protocol"`
-	Workspace   string                  `json:"workspace"`
-	Agents      []Card                  `json:"agents"`
-	Sessions    []board.NamedSession    `json:"sessions"`
-	RecentTasks []board.Task            `json:"recent_tasks"`
-	Coordinator *board.CoordinatorLease `json:"coordinator,omitempty"`
+	Protocol         string                  `json:"protocol"`
+	Workspace        string                  `json:"workspace"`
+	Agents           []Card                  `json:"agents"`
+	Sessions         []board.NamedSession    `json:"sessions"`
+	RecentTasks      []board.Task            `json:"recent_tasks"`
+	Coordinator      *board.CoordinatorLease `json:"coordinator,omitempty"`
+	RegistryWarnings []RegistryWarning       `json:"registry_warnings,omitempty"`
 }
 
 // Discover 는 Agent Card 목록에 열린 명명 세션과 최근 태스크를 붙여 반환한다
@@ -38,12 +39,14 @@ func Discover(workspace string, sessions []board.NamedSession, recent []board.Ta
 	if recent == nil {
 		recent = []board.Task{}
 	}
+	cards, warnings := CardsWithWarnings()
 	return Discovery{
-		Protocol:    "A2A/1.0 + ACP/1.0",
-		Workspace:   workspace,
-		Agents:      Cards(),
-		Sessions:    sessions,
-		RecentTasks: recent,
+		Protocol:         "A2A/1.0 + ACP/1.0",
+		Workspace:        workspace,
+		Agents:           cards,
+		Sessions:         sessions,
+		RecentTasks:      recent,
+		RegistryWarnings: warnings,
 	}
 }
 

@@ -23,7 +23,7 @@ func TestCoordinatorLeaseMCPDispatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("status 실패: %v", err)
 	}
-	if statusMap, ok := res.(map[string]any); !ok || statusMap["coordinator"].(*board.CoordinatorLease) != nil {
+	if statusMap, ok := res.(map[string]any); !ok || statusMap["coordinator"].(*board.CoordinatorLease) != nil || statusMap["status"] != "vacant" {
 		t.Fatalf("초기 coordinator 는 nil 이어야 합니다: %#v", res)
 	}
 
@@ -41,6 +41,13 @@ func TestCoordinatorLeaseMCPDispatch(t *testing.T) {
 	lease := claimed.(board.CoordinatorLease)
 	if lease.Term != 1 || lease.Leader != "agy" {
 		t.Fatalf("claim 결과 불일치: %+v", lease)
+	}
+	active, err := d.CallTool(ctx, "a2a_coordinator_lease", map[string]any{"action": "status"})
+	if err != nil {
+		t.Fatalf("active status 실패: %v", err)
+	}
+	if active.(map[string]any)["status"] != "active" {
+		t.Fatalf("claim 뒤 status 는 active 여야 합니다: %#v", active)
 	}
 
 	// discover 결과에도 coordinator 리스가 노출돼야 함
@@ -168,4 +175,36 @@ func TestCoordinatorLeaseMCPDispatch(t *testing.T) {
 		t.Fatalf("정상 ttl_seconds 파싱 실패: %v", err)
 	}
 	_ = time.Second
+}
+
+func TestCoordinatorAnonymousCallerCannotMutateLease(t *testing.T) {
+	b := board.New(filepath.Join(t.TempDir(), "board.json"))
+	d := &Dispatcher{Board: b, DefaultCwd: t.TempDir()}
+	ctx := context.Background()
+
+	status, err := d.CallTool(ctx, "a2a_coordinator_lease", map[string]any{"action": "status"})
+	if err != nil {
+		t.Fatalf("익명 status 는 허용돼야 합니다: %v", err)
+	}
+	if status.(map[string]any)["status"] != "vacant" {
+		t.Fatalf("익명 status 결과 불일치: %#v", status)
+	}
+
+	actions := []map[string]any{
+		{"action": "claim", "expected_term": float64(0)},
+		{"action": "renew", "expected_term": float64(0)},
+		{"action": "handoff", "expected_term": float64(0)},
+		{"action": "claim", "agent_id": agents.User, "expected_term": float64(0)},
+	}
+	for _, args := range actions {
+		if _, err := d.CallTool(ctx, "a2a_coordinator_lease", args); !errors.Is(err, ErrAgentIDRequired) {
+			t.Errorf("익명 %s 호출은 ErrAgentIDRequired 여야 합니다: %v", args["action"], err)
+		}
+	}
+
+	if _, err := d.CallTool(ctx, "a2a_coordinator_lease", map[string]any{
+		"action": "claim", "agent_id": "codex", "expected_term": float64(0),
+	}); err != nil {
+		t.Fatalf("명시 agent_id 가 있으면 claim 할 수 있어야 합니다: %v", err)
+	}
 }

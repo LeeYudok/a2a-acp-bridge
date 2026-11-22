@@ -40,19 +40,18 @@ type CoordinatorLease struct {
 	HandedOffTo    string   `json:"handed_off_to,omitempty"`
 }
 
-// GetCoordinator 는 현재 보드에 기록된 오케스트레이터 지휘 리스를 반환한다(없으면 nil).
+// GetCoordinator 는 coord.json에 기록된 오케스트레이터 지휘 리스를 반환한다(없으면 nil).
 func (b *Board) GetCoordinator() (*CoordinatorLease, error) {
+	if err := b.ensureCoordMigrated(); err != nil {
+		return nil, err
+	}
 	var out *CoordinatorLease
-	err := b.withLock(func() error {
-		st, err := b.load()
+	err := b.withCoordLock(func() error {
+		lease, _, err := b.loadCoordFile()
 		if err != nil {
 			return err
 		}
-		if st.Coordinator != nil {
-			copied := *st.Coordinator
-			copied.ActiveAgents = slices.Clone(st.Coordinator.ActiveAgents)
-			out = &copied
-		}
+		out = cloneCoordinator(lease)
 		return nil
 	})
 	return out, err
@@ -67,16 +66,19 @@ func (b *Board) ClaimCoordinator(agentID string, expectedTerm uint64, ttl time.D
 	if ttl <= 0 {
 		ttl = DefaultLeaseTTL
 	}
+	if err := b.ensureCoordMigrated(); err != nil {
+		return CoordinatorLease{}, err
+	}
 	var out CoordinatorLease
-	err := b.withLock(func() error {
-		st, err := b.load()
+	err := b.withCoordLock(func() error {
+		cur, _, err := b.loadCoordFile()
 		if err != nil {
 			return err
 		}
 		now := nowSeconds()
 		prevLeader := ""
 		var curTerm uint64
-		if cur := st.Coordinator; cur != nil {
+		if cur != nil {
 			curTerm = cur.Term
 			prevLeader = cur.Leader
 			if err := canTakeover(cur, agentID, expectedTerm, now, reason, force); err != nil {
@@ -94,8 +96,7 @@ func (b *Board) ClaimCoordinator(agentID string, expectedTerm uint64, ttl time.D
 			Reason:         strings.TrimSpace(reason),
 			ActiveAgents:   cleanAgents(activeAgents, agentID),
 		}
-		st.Coordinator = &next
-		if err := b.save(st); err != nil {
+		if err := b.saveCoordFile(&next); err != nil {
 			return err
 		}
 		out = next
@@ -112,22 +113,25 @@ func (b *Board) RenewCoordinator(agentID string, expectedTerm uint64, ttl time.D
 	if ttl <= 0 {
 		ttl = DefaultLeaseTTL
 	}
+	if err := b.ensureCoordMigrated(); err != nil {
+		return CoordinatorLease{}, err
+	}
 	var out CoordinatorLease
-	err := b.withLock(func() error {
-		st, err := b.load()
+	err := b.withCoordLock(func() error {
+		cur, _, err := b.loadCoordFile()
 		if err != nil {
 			return err
 		}
 		now := nowSeconds()
-		if err := validateLeaderCAS(st.Coordinator, agentID, expectedTerm, now); err != nil {
+		if err := validateLeaderCAS(cur, agentID, expectedTerm, now); err != nil {
 			return err
 		}
-		st.Coordinator.LeaseUntil = now + ttl.Seconds()
-		st.Coordinator.UpdatedAt = now
-		if err := b.save(st); err != nil {
+		cur.LeaseUntil = now + ttl.Seconds()
+		cur.UpdatedAt = now
+		if err := b.saveCoordFile(cur); err != nil {
 			return err
 		}
-		out = *st.Coordinator
+		out = *cloneCoordinator(cur)
 		return nil
 	})
 	return out, err
@@ -145,17 +149,19 @@ func (b *Board) HandoffCoordinator(fromAgent, toAgent string, expectedTerm uint6
 	if ttl <= 0 {
 		ttl = DefaultLeaseTTL
 	}
+	if err := b.ensureCoordMigrated(); err != nil {
+		return CoordinatorLease{}, err
+	}
 	var out CoordinatorLease
-	err := b.withLock(func() error {
-		st, err := b.load()
+	err := b.withCoordLock(func() error {
+		cur, _, err := b.loadCoordFile()
 		if err != nil {
 			return err
 		}
 		now := nowSeconds()
-		if err := validateLeaderCAS(st.Coordinator, fromAgent, expectedTerm, now); err != nil {
+		if err := validateLeaderCAS(cur, fromAgent, expectedTerm, now); err != nil {
 			return err
 		}
-		cur := st.Coordinator
 		var next CoordinatorLease
 		if toAgent != "" {
 			next = CoordinatorLease{
@@ -179,14 +185,27 @@ func (b *Board) HandoffCoordinator(fromAgent, toAgent string, expectedTerm uint6
 				HandedOffTo:    "*",
 			}
 		}
-		st.Coordinator = &next
-		if err := b.save(st); err != nil {
+		if err := b.saveCoordFile(&next); err != nil {
 			return err
 		}
 		out = next
 		return nil
 	})
 	return out, err
+}
+
+// CoordinatorStatus 는 리스 상태를 vacant, active, expired, handed_off 가운데 하나로 돌려준다.
+func CoordinatorStatus(lease *CoordinatorLease, now time.Time) string {
+	if lease == nil {
+		return "vacant"
+	}
+	if lease.HandedOffTo != "" {
+		return "handed_off"
+	}
+	if float64(now.UnixNano())/1e9 >= lease.LeaseUntil {
+		return "expired"
+	}
+	return "active"
 }
 
 func validateLeaderCAS(cur *CoordinatorLease, agentID string, expectedTerm uint64, now float64) error {

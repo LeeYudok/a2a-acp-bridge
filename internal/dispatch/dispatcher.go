@@ -83,7 +83,10 @@ func (d *Dispatcher) CallTool(ctx context.Context, name string, args map[string]
 		}
 		sessions, _ := d.Board.ListSessions(false)
 		disc := agents.Discover(d.DefaultCwd, sessions, tasks)
-		disc.Coordinator, _ = d.Board.GetCoordinator()
+		disc.Coordinator, err = d.Board.GetCoordinator()
+		if err != nil {
+			return nil, err
+		}
 		return disc, nil
 	case "a2a_coordinator_lease":
 		return d.callCoordinatorLease(args)

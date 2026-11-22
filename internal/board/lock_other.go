@@ -2,6 +2,6 @@
 
 package board
 
-func lockBoardFile(_ string) (func(), error) {
+func lockFile(_ string) (func(), error) {
 	return func() {}, nil
 }

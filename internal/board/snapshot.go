@@ -18,11 +18,16 @@ func (b *Board) Snapshot() (Snapshot, error) {
 		if err != nil {
 			return err
 		}
+		st.Coordinator = nil
 		raw, err := json.Marshal(normalizeBoardState(st))
 		if err != nil {
 			return err
 		}
 		return json.Unmarshal(raw, &out)
 	})
+	if err != nil {
+		return out, err
+	}
+	out.Coordinator, err = b.GetCoordinator()
 	return out, err
 }

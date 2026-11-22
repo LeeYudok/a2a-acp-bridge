@@ -2,12 +2,14 @@ package dispatch
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/LeeYudok/a2a-acp-bridge/internal/agents"
 	"github.com/LeeYudok/a2a-acp-bridge/internal/board"
 )
 
@@ -15,6 +17,9 @@ const (
 	maxExactFloat53    = float64(uint64(1) << 53)
 	maxLeaseTTLSeconds = int64(math.MaxInt64 / int64(time.Second))
 )
+
+// ErrAgentIDRequired 는 익명 호출자가 리스를 변경하려 할 때 반환한다.
+var ErrAgentIDRequired = errors.New("coord 변경에는 식별된 에이전트 ID가 필요함")
 
 func (d *Dispatcher) callCoordinatorLease(args map[string]any) (any, error) {
 	action := strArg(args, "action", "status")
@@ -33,8 +38,14 @@ func (d *Dispatcher) callCoordinatorLease(args map[string]any) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"coordinator": lease}, nil
+		return map[string]any{
+			"coordinator": lease,
+			"status":      board.CoordinatorStatus(lease, time.Now()),
+		}, nil
 	case "claim":
+		if err := requireAgentID(action, agentID); err != nil {
+			return nil, err
+		}
 		expectedTerm, err := parseExpectedTerm(args)
 		if err != nil {
 			return nil, err
@@ -48,12 +59,18 @@ func (d *Dispatcher) callCoordinatorLease(args map[string]any) (any, error) {
 			boolArg(args, "force", false),
 		)
 	case "renew":
+		if err := requireAgentID(action, agentID); err != nil {
+			return nil, err
+		}
 		expectedTerm, err := parseExpectedTerm(args)
 		if err != nil {
 			return nil, err
 		}
 		return d.Board.RenewCoordinator(agentID, expectedTerm, ttl)
 	case "handoff":
+		if err := requireAgentID(action, agentID); err != nil {
+			return nil, err
+		}
 		expectedTerm, err := parseExpectedTerm(args)
 		if err != nil {
 			return nil, err
@@ -68,6 +85,13 @@ func (d *Dispatcher) callCoordinatorLease(args map[string]any) (any, error) {
 	default:
 		return nil, fmt.Errorf("a2a_coordinator_lease: 알 수 없는 action %q (status|claim|renew|handoff)", action)
 	}
+}
+
+func requireAgentID(action, agentID string) error {
+	if agentID != "" && agentID != agents.User {
+		return nil
+	}
+	return fmt.Errorf("a2a_coordinator_lease %s: -agent 또는 A2A_AGENT_ID 필요: %w", action, ErrAgentIDRequired)
 }
 
 func parseExpectedTerm(args map[string]any) (uint64, error) {

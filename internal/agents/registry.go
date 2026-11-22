@@ -2,6 +2,7 @@ package agents
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,12 @@ import (
 
 // User 는 사람이 CLI 나 HTTP 로 직접 호출했을 때의 발신자 ID 다
 const User = "user"
+
+// RegistryWarning 은 동적 에이전트 파일을 읽지 못했을 때 Discovery 에 노출하는 경고다.
+type RegistryWarning struct {
+	Source  string `json:"source"`
+	Message string `json:"message"`
+}
 
 // ExtraAgentsPath 는 동적 N-에이전트 정의 파일 경로를 반환한다.
 // A2A_AGENTS_FILE 환경변수가 없으면 ~/.local/share/a2a-acp-bridge/agents.json 을 확인한다.
@@ -43,10 +50,16 @@ func IsValidSlug(id string) bool {
 
 // Cards 는 기본 내장 에이전트(agy·codex·claude)와 동적 레지스트리(hermes·opencode 등)를 합쳐 반환한다.
 func Cards() []Card {
+	cards, _ := CardsWithWarnings()
+	return cards
+}
+
+// CardsWithWarnings 는 내장 카드와 동적 카드를 합쳐 반환하고, agents.json 파싱 실패도 함께 반환한다.
+func CardsWithWarnings() ([]Card, []RegistryWarning) {
 	base := builtinCards()
-	extra := loadExtraCards(ExtraAgentsPath())
+	extra, warnings := loadExtraCards(ExtraAgentsPath())
 	if len(extra) == 0 {
-		return base
+		return base, warnings
 	}
 	byIdx := make(map[string]int, len(base))
 	for i, c := range base {
@@ -60,20 +73,26 @@ func Cards() []Card {
 		byIdx[c.ID] = len(base)
 		base = append(base, c)
 	}
-	return base
+	return base, warnings
 }
 
-func loadExtraCards(path string) []Card {
+func loadExtraCards(path string) ([]Card, []RegistryWarning) {
 	if path == "" {
-		return nil
+		return nil, nil
 	}
 	raw, err := os.ReadFile(path)
-	if err != nil || len(raw) == 0 {
-		return nil
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, []RegistryWarning{{Source: path, Message: err.Error()}}
+	}
+	if len(raw) == 0 {
+		return nil, nil
 	}
 	var parsed []Card
 	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return nil
+		return nil, []RegistryWarning{{Source: path, Message: err.Error()}}
 	}
 	out := make([]Card, 0, len(parsed))
 	for _, c := range parsed {
@@ -92,7 +111,7 @@ func loadExtraCards(path string) []Card {
 		}
 		out = append(out, c)
 	}
-	return out
+	return out, nil
 }
 
 // IDs 는 보드 메시지를 받을 수 있는 에이전트 ID 목록이다
@@ -117,6 +136,7 @@ var clientHints = []struct{ hint, id string }{
 	{"agy", "agy"},
 	{"gemini", "agy"},
 	{"claude", "claude"},
+	{"claudedesktop", "claude"},
 }
 
 // FromClientName 은 MCP 클라이언트 이름으로 에이전트 ID 를 추정한다.
