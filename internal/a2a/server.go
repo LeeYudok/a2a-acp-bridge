@@ -9,6 +9,7 @@ import (
 
 	"github.com/LeeYudok/a2a-acp-bridge/internal/dispatch"
 	"github.com/LeeYudok/a2a-acp-bridge/internal/jsonrpc"
+	"github.com/LeeYudok/a2a-acp-bridge/internal/monitor"
 )
 
 // methodTools 는 A2A JSON-RPC 메서드를 Dispatcher 도구 이름으로 잇는다
@@ -34,6 +35,14 @@ func NewMux(d *dispatch.Dispatcher) *http.ServeMux {
 	}
 	mux.HandleFunc("GET /.well-known/agent.json", handleCards)
 	mux.HandleFunc("GET /agents", handleCards)
+	mux.HandleFunc("GET /monitor/snapshot", func(w http.ResponseWriter, r *http.Request) {
+		snapshot, err := monitor.Capture(d.Board, time.Now(), monitor.DefaultStaleAfter)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, snapshot)
+	})
 	mux.HandleFunc("POST /a2a", func(w http.ResponseWriter, r *http.Request) {
 		handlePost(d, w, r)
 	})
