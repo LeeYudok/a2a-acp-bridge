@@ -102,3 +102,10 @@ go build -o ~/.local/bin/a2a-acp-bridge ./cmd/a2a-acp-bridge
 - **N-에이전트 등록**: `agy`·`codex`·`claude` 외 에이전트를 `~/.local/share/a2a-acp-bridge/agents.json`(`A2A_AGENTS_FILE`)에 추가할 수 있다. ID는 소문자 slug(`^[a-z0-9][a-z0-9-]{0,23}$`)를 쓴다. 파일 파싱에 실패하면 내장 에이전트는 유지되고 `a2a_discover_agents.registry_warnings`에 오류가 나온다.
 - **단일 지휘 리스(Lease)**: 단 한 명만 `term` + `lease_until` 리스를 보유한다. 리스와 CAS는 같은 디렉터리의 `coord.json`과 그 전용 flock으로 처리한다. `a2a-acp-bridge coord <status|claim|renew|handoff>` 또는 MCP 도구 `a2a_coordinator_lease`를 쓴다. claim·renew·handoff에는 식별된 `agent_id`가 필요하다.
 - **승계·복귀**: 현 지휘자가 중단·오류·할당량 초과·리스 만료 상태면 남은 에이전트가 이어받는다. 이슈 #8 예고 후 `term + 1` 리스를 확정한다. 명령은 `a2a-acp-bridge coord claim -expected-term <N> [-force]`다. 복귀한 전임 지휘자는 `#8` 및 `coord.json`의 최신 `term`을 인정하고 일반 작업자/리뷰어로 합류한다.
+
+### 6. 계열별 위임 풀
+
+- `pool.json`(기본 `~/.local/share/a2a-acp-bridge/pool.json`, 재정의 `A2A_POOL_FILE`) 설정 예시는 `{"max_total":8,"default":{"min":0,"max":2},"families":{"codex-glm":{"min":1,"max":3}}}`이다. 파일이 없으면 상한은 무제한이고 하한은 0이다.
+- `agents.json` 카드의 `family`를 계열로 쓰고, 생략하면 ID를 쓴다. 별도 Codex 라우트는 브리지 프로세스의 `A2A_CODEX_AGENT_ID`로 대상 카드를 정한다.
+- 세 위임 도구는 보드 flock 안에서 `working` 태스크를 세고 새 태스크를 기록한다. 같은 풀을 쓰는 프로세스에 같은 보드·풀 설정·에이전트 등록 경로를 지정한다. 하한은 표시와 경고에만 쓰며 에이전트 시작은 운영자가 맡는다.
+- `pool status`나 `a2a_pool`의 `status`로 상태를 본다. 설정 변경 권한과 명령 예시는 [README의 계열별 위임 풀](README.md#55-계열별-위임-풀)을 따른다.

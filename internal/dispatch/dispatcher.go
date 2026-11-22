@@ -39,6 +39,8 @@ type Dispatcher struct {
 	DefaultCwd string
 	// Caller 는 요청에 from_agent 가 없을 때 쓰는 발신자 ID 다. 비어 있으면 user 로 기록한다.
 	Caller string
+	// PoolActor is configured by the host and never inferred from an MCP client name.
+	PoolActor string
 	// AsyncTimeout 은 async(--no-wait) 작업의 실행 시간 상한이다. 0 이면 상한이 없다(MCP 서버 기본).
 	AsyncTimeout time.Duration
 	asyncWG      sync.WaitGroup
@@ -87,7 +89,10 @@ func (d *Dispatcher) CallTool(ctx context.Context, name string, args map[string]
 		if err != nil {
 			return nil, err
 		}
-		return disc, nil
+		disc.Pool, err = d.Board.PoolStatus(agents.Families(disc.Agents))
+		return disc, err
+	case "a2a_pool":
+		return d.CallPool(args, d.PoolActor)
 	case "a2a_coordinator_lease":
 		return d.callCoordinatorLease(args)
 	case "acp_delegate_to_agy":

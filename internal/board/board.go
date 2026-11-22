@@ -163,27 +163,44 @@ func (b *Board) SendMessage(fromAgent, toAgent, content, intent, taskID string) 
 	if intent == "" {
 		intent = "delegate"
 	}
+	return b.recordMessage(fromAgent, toAgent, content, intent, taskID, state, "")
+}
+
+// CompleteDelegation records the reply and releases capacity in the same transaction.
+func (b *Board) CompleteDelegation(from, to, content, taskID, session string) (Message, error) {
+	return b.recordMessage(from, to, content, "reply", taskID, "completed", session)
+}
+
+func (b *Board) recordMessage(fromAgent, toAgent, content, intent, taskID, state, session string) (Message, error) {
 	var msg Message
 	err := b.withLock(func() error {
 		st, err := b.load()
 		if err != nil {
 			return err
 		}
-		now := nowSeconds()
-		t, err := upsertTaskInState(&st, fromAgent, toAgent, content, state, taskID, "", now)
+		msg, err = addMessage(&st, fromAgent, toAgent, content, intent, taskID, state, session)
 		if err != nil {
 			return err
 		}
-		mid, err := newID("msg")
-		if err != nil {
-			return err
-		}
-		msg = Message{
-			MessageID: mid, TaskID: t.TaskID, FromAgent: fromAgent,
-			ToAgent: toAgent, Intent: intent, Content: content, CreatedAt: now,
-		}
-		st.Messages = append(st.Messages, msg)
 		return b.save(st)
 	})
 	return msg, err
+}
+
+func addMessage(st *boardState, from, to, content, intent, taskID, state, session string) (Message, error) {
+	now := nowSeconds()
+	task, err := upsertTaskInState(st, from, to, content, state, taskID, session, now)
+	if err != nil {
+		return Message{}, err
+	}
+	id, err := newID("msg")
+	if err != nil {
+		return Message{}, err
+	}
+	msg := Message{
+		MessageID: id, TaskID: task.TaskID, FromAgent: from, ToAgent: to,
+		Intent: intent, Content: content, CreatedAt: now,
+	}
+	st.Messages = append(st.Messages, msg)
+	return msg, nil
 }

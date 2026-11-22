@@ -43,7 +43,7 @@ func (d *Dispatcher) callDelegateClaude(ctx context.Context, args map[string]any
 		return ClaudeDelegateResult{}, fmt.Errorf("permission_mode 는 %v 중 하나여야 합니다: %s", claude.PermissionModes, turn.mode)
 	}
 
-	msg, err := d.Board.SendMessage(turn.from, "claude", turn.prompt, "delegate", "")
+	msg, err := d.startDelegation(turn.from, "claude", turn.prompt, turn.sid)
 	if err != nil {
 		return ClaudeDelegateResult{}, err
 	}
@@ -51,7 +51,6 @@ func (d *Dispatcher) callDelegateClaude(ctx context.Context, args map[string]any
 	if !boolArg(args, "async", false) {
 		return d.executeClaudeTurn(ctx, turn)
 	}
-	_, _ = d.Board.UpsertTask(turn.from, "claude", turn.prompt, "working", turn.taskID, turn.sid)
 	d.asyncWG.Add(1)
 	go func() {
 		defer d.asyncWG.Done()
@@ -79,8 +78,9 @@ func (d *Dispatcher) executeClaudeTurn(ctx context.Context, t claudeTurn) (Claud
 	if t.sessionName != "" && res.SessionID != "" {
 		_, _ = d.Board.UpsertSession(t.sessionName, "claude", res.SessionID, t.cwd, t.mode, "")
 	}
-	_, _ = d.Board.SendMessage("claude", t.from, res.Response, "reply", t.taskID)
-	_, _ = d.Board.UpsertTask(t.from, "claude", t.prompt, "completed", t.taskID, res.SessionID)
+	if _, err := d.Board.CompleteDelegation("claude", t.from, res.Response, t.taskID, res.SessionID); err != nil {
+		return ClaudeDelegateResult{}, err
+	}
 	return ClaudeDelegateResult{
 		Agent:          "claude",
 		Protocol:       claudeProtocol,

@@ -11,6 +11,7 @@ type Skill struct {
 
 // Card 는 A2A 표준 에이전트 메타데이터다
 type Card struct {
+	Family       string          `json:"family,omitempty"`
 	ID           string          `json:"id"`
 	Name         string          `json:"name"`
 	Version      string          `json:"version"`
@@ -22,6 +23,7 @@ type Card struct {
 
 // Discovery 는 a2a_discover_agents 도구와 /.well-known/agent.json 의 응답이다
 type Discovery struct {
+	Pool             board.PoolStatus        `json:"pool"`
 	Protocol         string                  `json:"protocol"`
 	Workspace        string                  `json:"workspace"`
 	Agents           []Card                  `json:"agents"`

@@ -42,6 +42,7 @@ func enumProp(values []string) map[string]any {
 // Tools 는 Dispatcher.CallTool 이 처리하는 도구의 스키마 목록이다
 func Tools() []ToolSchema {
 	return []ToolSchema{
+		poolTool(),
 		{
 			Name:        "a2a_discover_agents",
 			Description: "A2A Agent Card 목록(agy, codex, claude 및 동적 등록 에이전트), 명명 세션, 최근 태스크, 현재 오케스트레이터 지휘 리스, agents.json 경고를 조회합니다.",

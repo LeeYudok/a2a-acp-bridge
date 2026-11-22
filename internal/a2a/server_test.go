@@ -51,6 +51,8 @@ func TestAgentCardAndControlEndpoints(t *testing.T) {
 }
 
 func TestMonitorSnapshotEndpointIsReadOnly(t *testing.T) {
+	t.Setenv("A2A_AGENTS_FILE", filepath.Join(t.TempDir(), "agents.json"))
+	t.Setenv("A2A_POOL_FILE", filepath.Join(t.TempDir(), "pool.json"))
 	b := board.New(filepath.Join(t.TempDir(), "board.json"))
 	if _, err := b.SendMessage("codex", "agy", "private prompt body", "delegate", ""); err != nil {
 		t.Fatalf("SendMessage failed: %v", err)
@@ -75,6 +77,7 @@ func TestMonitorSnapshotEndpointIsReadOnly(t *testing.T) {
 		t.Fatalf("snapshot leaked message body: %s", raw)
 	}
 	var got struct {
+		Pool   board.PoolStatus `json:"pool"`
 		Agents []struct {
 			ID string `json:"id"`
 		} `json:"agents"`
@@ -86,7 +89,7 @@ func TestMonitorSnapshotEndpointIsReadOnly(t *testing.T) {
 	if err := json.Unmarshal(raw, &got); err != nil {
 		t.Fatalf("decode snapshot: %v", err)
 	}
-	if len(got.Agents) != 3 || len(got.Tasks) != 1 || got.Tasks[0].TaskID == "" || got.Sessions == nil {
+	if len(got.Pool.Families) != 3 || len(got.Agents) != 3 || len(got.Tasks) != 1 || got.Tasks[0].TaskID == "" || got.Sessions == nil {
 		t.Fatalf("snapshot = %s", raw)
 	}
 }

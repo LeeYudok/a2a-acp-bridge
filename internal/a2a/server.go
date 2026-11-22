@@ -3,12 +3,14 @@ package a2a
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net/http"
 	"sync"
 	"time"
 
+	"github.com/LeeYudok/a2a-acp-bridge/internal/board"
 	"github.com/LeeYudok/a2a-acp-bridge/internal/dispatch"
 	"github.com/LeeYudok/a2a-acp-bridge/internal/jsonrpc"
 	"github.com/LeeYudok/a2a-acp-bridge/internal/monitor"
@@ -42,6 +44,8 @@ var methodTools = map[string]string{
 	"acp/control": "acp_session_control",
 	"a2a/codex":   "a2a_delegate_to_codex",
 	"a2a/claude":  "a2a_delegate_to_claude",
+	"a2a/pool":    "a2a_pool",
+	"a2a_pool":    "a2a_pool",
 }
 
 // NewMux 는 Go 1.22+ ServeMux 로 A2A HTTP 라우터를 만든다
@@ -76,7 +80,9 @@ func NewMux(d *dispatch.Dispatcher) *http.ServeMux {
 func handlePost(d *dispatch.Dispatcher, w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 	var req jsonrpc.Request
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+	dec := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
+	dec.UseNumber()
+	if err := dec.Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
 		return
 	}
@@ -85,9 +91,19 @@ func handlePost(d *dispatch.Dispatcher, w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusBadRequest, map[string]any{"jsonrpc": "2.0", "id": req.ID, "error": "unknown method: " + req.Method})
 		return
 	}
-	res, err := d.CallTool(r.Context(), toolName, req.Params)
+	var res any
+	var err error
+	if toolName == "a2a_pool" {
+		res, err = d.CallPool(req.Params, poolActor(r))
+	} else {
+		res, err = d.CallTool(r.Context(), toolName, req.Params)
+	}
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"jsonrpc": "2.0", "id": req.ID, "error": err.Error()})
+		status := http.StatusBadRequest
+		if errors.Is(err, board.ErrPoolSetForbidden) {
+			status = http.StatusForbidden
+		}
+		writeJSON(w, status, map[string]any{"jsonrpc": "2.0", "id": req.ID, "error": err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": res})

@@ -30,6 +30,8 @@ func newMockPool(t *testing.T) *acp.SessionPool {
 }
 
 func TestBoardAndMessageLifecycle(t *testing.T) {
+	t.Setenv("A2A_AGENTS_FILE", filepath.Join(t.TempDir(), "agents.json"))
+	t.Setenv("A2A_POOL_FILE", filepath.Join(t.TempDir(), "pool.json"))
 	d := newTestDispatcher(t, nil)
 	ctx := context.Background()
 

@@ -2,6 +2,10 @@ package dispatch
 
 import (
 	"context"
+	"fmt"
+	"os"
+
+	"github.com/LeeYudok/a2a-acp-bridge/internal/agents"
 
 	"github.com/LeeYudok/a2a-acp-bridge/internal/codex"
 )
@@ -21,20 +25,29 @@ type CodexDelegateResult struct {
 const codexProtocol = "Codex-JSONL-exec"
 
 type codexTurn struct {
-	from, cwd, sandbox, prompt, tid, sessionName, taskID string
+	from, target, cwd, sandbox, prompt, tid, sessionName, taskID string
 }
 
 func (d *Dispatcher) callDelegateCodex(ctx context.Context, args map[string]any) (CodexDelegateResult, error) {
+	target := os.Getenv("A2A_CODEX_AGENT_ID")
+	if target == "" {
+		target = "codex"
+	}
+	families := agents.Families(agents.Cards())
+	if _, ok := families[target]; !ok {
+		return CodexDelegateResult{}, fmt.Errorf("등록되지 않은 A2A_CODEX_AGENT_ID %q", target)
+	}
 	sessionName := strArg(args, "session_name", "")
-	tid, cwd := d.resolveAgentSession("codex", args, "thread_id")
+	tid, cwd := d.resolveAgentSession(target, args, "thread_id")
 	sandbox := strArg(args, "sandbox", "")
 	if sandbox == "" && sessionName != "" {
-		if rec, err := d.Board.ResolveSession(sessionName, "codex"); err == nil {
+		if rec, err := d.Board.ResolveSession(sessionName, target); err == nil {
 			sandbox = rec.Mode
 		}
 	}
 	turn := codexTurn{
 		from:        d.caller(args),
+		target:      target,
 		cwd:         cwd,
 		tid:         tid,
 		sandbox:     sandbox,
@@ -42,7 +55,7 @@ func (d *Dispatcher) callDelegateCodex(ctx context.Context, args map[string]any)
 		sessionName: sessionName,
 	}
 
-	msg, err := d.Board.SendMessage(turn.from, "codex", turn.prompt, "delegate", "")
+	msg, err := d.Board.StartDelegation(turn.from, target, turn.prompt, turn.tid, families)
 	if err != nil {
 		return CodexDelegateResult{}, err
 	}
@@ -50,7 +63,6 @@ func (d *Dispatcher) callDelegateCodex(ctx context.Context, args map[string]any)
 	if !boolArg(args, "async", false) {
 		return d.executeCodexTurn(ctx, turn)
 	}
-	_, _ = d.Board.UpsertTask(turn.from, "codex", turn.prompt, "working", turn.taskID, turn.tid)
 	d.asyncWG.Add(1)
 	go func() {
 		defer d.asyncWG.Done()
@@ -59,7 +71,7 @@ func (d *Dispatcher) callDelegateCodex(ctx context.Context, args map[string]any)
 		_, _ = d.executeCodexTurn(actx, turn)
 	}()
 	return CodexDelegateResult{
-		Agent:       "codex",
+		Agent:       turn.target,
 		Protocol:    codexProtocol,
 		ThreadID:    turn.tid,
 		SessionName: turn.sessionName,
@@ -73,16 +85,17 @@ func (d *Dispatcher) executeCodexTurn(ctx context.Context, t codexTurn) (CodexDe
 	sandbox := codex.EffectiveSandbox(t.sandbox, t.tid)
 	res, err := codex.Run(ctx, t.cwd, sandbox, t.prompt, t.tid)
 	if err != nil {
-		_, _ = d.Board.UpsertTask(t.from, "codex", t.prompt, "failed", t.taskID, t.tid)
+		_, _ = d.Board.UpsertTask(t.from, t.target, t.prompt, "failed", t.taskID, t.tid)
 		return CodexDelegateResult{}, err
 	}
 	if t.sessionName != "" && res.ThreadID != "" {
-		_, _ = d.Board.UpsertSession(t.sessionName, "codex", res.ThreadID, t.cwd, sandbox, "")
+		_, _ = d.Board.UpsertSession(t.sessionName, t.target, res.ThreadID, t.cwd, sandbox, "")
 	}
-	_, _ = d.Board.SendMessage("codex", t.from, res.Response, "reply", t.taskID)
-	_, _ = d.Board.UpsertTask(t.from, "codex", t.prompt, "completed", t.taskID, res.ThreadID)
+	if _, err := d.Board.CompleteDelegation(t.target, t.from, res.Response, t.taskID, res.ThreadID); err != nil {
+		return CodexDelegateResult{}, err
+	}
 	return CodexDelegateResult{
-		Agent:       "codex",
+		Agent:       t.target,
 		Protocol:    codexProtocol,
 		ThreadID:    res.ThreadID,
 		SessionName: t.sessionName,
