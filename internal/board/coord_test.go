@@ -1,8 +1,11 @@
 package board
 
 import (
+	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -130,5 +133,82 @@ func TestCoordinatorConcurrentClaimSplitBrainPrevention(t *testing.T) {
 	cur, err := New(store).GetCoordinator()
 	if err != nil || cur == nil || cur.Term != 1 {
 		t.Fatalf("저장된 최종 리스 확인 실패: cur=%v, err=%v", cur, err)
+	}
+}
+
+func TestCoordinatorStatus(t *testing.T) {
+	now := time.Unix(1000, 0)
+	cases := []struct {
+		name  string
+		lease *CoordinatorLease
+		want  string
+	}{
+		{name: "없음", lease: nil, want: "vacant"},
+		{name: "활성", lease: &CoordinatorLease{Leader: "codex", Term: 1, LeaseUntil: 1001}, want: "active"},
+		{name: "만료", lease: &CoordinatorLease{Leader: "codex", Term: 1, LeaseUntil: 999}, want: "expired"},
+		{name: "개방 이양", lease: &CoordinatorLease{Leader: "codex", Term: 1, HandedOffTo: "*"}, want: "handed_off"},
+	}
+	for _, tc := range cases {
+		if got := CoordinatorStatus(tc.lease, now); got != tc.want {
+			t.Errorf("%s: got=%q, 원하는 값 %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestCoordinatorLeaseSurvivesLegacyBoardRewrite(t *testing.T) {
+	dir := t.TempDir()
+	boardPath := filepath.Join(dir, "a2a_board.json")
+	b := New(boardPath)
+	first, err := b.ClaimCoordinator("codex", 0, time.Hour, "초기 지휘", []string{"codex", "agy"}, false)
+	if err != nil {
+		t.Fatalf("초기 ClaimCoordinator 실패: %v", err)
+	}
+
+	// #16 이전 바이너리가 Coordinator 필드를 모른 채 보드 전체를 다시 쓴 상황이다.
+	legacyBoard := []byte(`{"tasks":[],"messages":[],"sessions":[]}`)
+	if err := os.WriteFile(boardPath, legacyBoard, 0o600); err != nil {
+		t.Fatalf("구버전 보드 덮어쓰기 실패: %v", err)
+	}
+
+	cur, err := New(boardPath).GetCoordinator()
+	if err != nil {
+		t.Fatalf("보드 덮어쓰기 뒤 GetCoordinator 실패: %v", err)
+	}
+	if cur == nil || cur.Term != first.Term || cur.Leader != first.Leader {
+		t.Fatalf("구버전 보드 쓰기 뒤 리스가 바뀜: got=%+v want=%+v", cur, first)
+	}
+	if _, err := New(boardPath).ClaimCoordinator("agy", 0, time.Hour, "term 재사용", nil, false); !errors.Is(err, ErrTermMismatch) {
+		t.Fatalf("기존 term 1 을 expected_term=0 으로 재사용하면 ErrTermMismatch 여야 합니다: %v", err)
+	}
+}
+
+func TestCoordinatorMigratesLegacyBoardLease(t *testing.T) {
+	dir := t.TempDir()
+	boardPath := filepath.Join(dir, "a2a_board.json")
+	legacy := boardState{Coordinator: &CoordinatorLease{
+		Leader: "agy", Term: 7, LeaseUntil: float64(time.Now().Add(time.Hour).Unix()), UpdatedAt: 1,
+		ActiveAgents: []string{"agy", "codex"},
+	}}
+	raw, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatalf("기존 보드 JSON 생성 실패: %v", err)
+	}
+	if err := os.WriteFile(boardPath, raw, 0o600); err != nil {
+		t.Fatalf("기존 보드 쓰기 실패: %v", err)
+	}
+
+	cur, err := New(boardPath).GetCoordinator()
+	if err != nil || cur == nil || cur.Term != 7 || cur.Leader != "agy" {
+		t.Fatalf("기존 보드 리스 마이그레이션 실패: cur=%+v, err=%v", cur, err)
+	}
+	if _, err := New(boardPath).SendMessage("codex", "agy", "마이그레이션 뒤 보드 쓰기", "sync", ""); err != nil {
+		t.Fatalf("마이그레이션 뒤 SendMessage 실패: %v", err)
+	}
+	rewritten, err := os.ReadFile(boardPath)
+	if err != nil {
+		t.Fatalf("갱신된 보드 읽기 실패: %v", err)
+	}
+	if strings.Contains(string(rewritten), `"coordinator"`) {
+		t.Fatalf("새 보드 저장이 coordinator 필드를 다시 기록함: %s", rewritten)
 	}
 }

@@ -14,7 +14,7 @@
 | `internal/acp/acptest` | 테스트용 모의 ACP 에이전트 |
 | `internal/codex` | `codex exec` 러너 |
 | `internal/claude` | `claude -p --output-format json` 러너(Claude Code 위임) |
-| `internal/board` | 공유 보드(태스크·메시지·명명 세션·지휘권 리스·스냅샷), flock + 임시 파일 원자 저장 |
+| `internal/board` | 공유 보드(태스크·메시지·명명 세션)와 `coord.json` 지휘권 리스, 파일별 flock + 임시 파일 원자 저장 |
 | `internal/agents` | Agent Card, 내장·동적(`agents.json`) 에이전트 레지스트리, MCP clientInfo 추정 |
 | `internal/mcp`, `internal/a2a` | MCP stdio 서버, A2A HTTP 서버 |
 | `internal/jsonrpc`, `internal/gate` | 공용 JSON-RPC 요청 타입, 개인 게이트 감지 |
@@ -92,11 +92,11 @@ go build -o ~/.local/bin/a2a-acp-bridge ./cmd/a2a-acp-bridge
 - 실시간 변화 감시: `a2a-acp-bridge watch`(기본 1초 폴링, `-interval`·`-agent`·`-all`·`-timeout`). 새 메시지·읽음·태스크 상태·지휘권 리스 변화를 JSON 이벤트 한 줄로 출력한다. 폴링이라 한 주기 안의 중간 상태는 건너뛴다.
 - 서로에게 일을 맡길 때: `ask-agy`·`ask-codex`·`ask-claude`(Claude 는 기본 `-permission-mode plan`, 수정까지 맡길 땐 `acceptEdits`). 응답은 발신자 수신함에도 남는다.
 - 브리지 프로세스를 여러 개 동시에 띄울 때는 PR #6 이후 바이너리를 쓴다. 그 이전 바이너리는 보드 `.tmp` 경로가 고정이라 동시에 쓰면 rename 이 실패한다.
-- 바이너리를 바꾸면 각 에이전트의 MCP 서버(`a2a-acp-bridge mcp`)까지 모든 브리지 프로세스를 다시 띄운다. PR #16 이전 프로세스가 보드에 쓰면 지휘권 리스가 지워진다(#20).
+- 바이너리를 바꾸면 각 에이전트의 MCP 서버(`a2a-acp-bridge mcp`)까지 모든 브리지 프로세스를 다시 띄운다. PR #16 이전 프로세스가 `a2a_board.json`을 덮어써도 `coord.json` 리스는 지워지지 않는다. 다만 그 프로세스는 새 리스 저장소를 읽지 못하므로 재시작이 필요하다(#20).
 - 할당량·토큰 한도에 걸리면 이슈 #8 이나 담당 이슈에 "언제까지 불가" 를 남긴다. 남은 에이전트는 그 사이 그 에이전트 담당 작업을 위 3절대로 처리한다.
 
 ### 5. 오케스트레이터 지휘권 승계(Failover) 및 다중 에이전트(N-agent) 확장
 
-- **N-에이전트 등록**: `agy`·`codex`·`claude` 외에 `hermes`, `opencode` 등 소문자 slug(`^[a-z0-9][a-z0-9-]{0,23}$`) 에이전트를 `~/.local/share/a2a-acp-bridge/agents.json`(`A2A_AGENTS_FILE`) 에 추가해 코드 수정 없이 참여·발견할 수 있다.
-- **단일 지휘 리스(Lease)**: 특정 에이전트가 영구 지휘권을 갖지 않으며, 단 한 명만 `term` + `lease_until` 리스를 보유한다. 보드 원자 CAS 는 `a2a-acp-bridge coord <status|claim|renew|handoff>` 또는 MCP 도구 `a2a_coordinator_lease` 로 처리한다.
-- **승계·복귀**: 현 지휘자가 중단·오류·할당량 초과·리스 만료 상태면 남은 에이전트가 이슈 #8 예고 후 `term + 1` 리스를 확정(`coord claim -expected-term <N> [-force]`)하고 브로드캐스트한다. 복귀한 전임 지휘자는 `#8` 및 보드의 최신 `term` 을 인정하고 일반 작업자/리뷰어로 합류한다.
+- **N-에이전트 등록**: `agy`·`codex`·`claude` 외 에이전트를 `~/.local/share/a2a-acp-bridge/agents.json`(`A2A_AGENTS_FILE`)에 추가할 수 있다. ID는 소문자 slug(`^[a-z0-9][a-z0-9-]{0,23}$`)를 쓴다. 파일 파싱에 실패하면 내장 에이전트는 유지되고 `a2a_discover_agents.registry_warnings`에 오류가 나온다.
+- **단일 지휘 리스(Lease)**: 단 한 명만 `term` + `lease_until` 리스를 보유한다. 리스와 CAS는 같은 디렉터리의 `coord.json`과 그 전용 flock으로 처리한다. `a2a-acp-bridge coord <status|claim|renew|handoff>` 또는 MCP 도구 `a2a_coordinator_lease`를 쓴다. claim·renew·handoff에는 식별된 `agent_id`가 필요하다.
+- **승계·복귀**: 현 지휘자가 중단·오류·할당량 초과·리스 만료 상태면 남은 에이전트가 이어받는다. 이슈 #8 예고 후 `term + 1` 리스를 확정한다. 명령은 `a2a-acp-bridge coord claim -expected-term <N> [-force]`다. 복귀한 전임 지휘자는 `#8` 및 `coord.json`의 최신 `term`을 인정하고 일반 작업자/리뷰어로 합류한다.

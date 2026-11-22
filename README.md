@@ -63,8 +63,8 @@ AI 코딩 에이전트 셋(`agy`, `codex`, `claude`)을 함께 쓸 때 프로세
 └─────────────────────────────────────────────────────────────────────────┘
           │                 │                 │                 │
           ▼                 ▼                 ▼                 ▼
-       agy acp         codex exec         claude -p      a2a_board.json
-     (ACP stdio)         (JSONL)           (JSON)       (flock·원자 교체)
+       agy acp         codex exec         claude -p      a2a_board.json · coord.json
+     (ACP stdio)         (JSONL)           (JSON)       (각 파일 flock·원자 교체)
 ```
 
 - 위쪽이 호출자다. 에이전트는 MCP로, 사람과 스크립트는 CLI나 A2A HTTP로 부른다. 어느 호출자든 아래쪽 어느 에이전트에게든 위임할 수 있다.
@@ -109,7 +109,7 @@ AI 코딩 에이전트 셋(`agy`, `codex`, `claude`)을 함께 쓸 때 프로세
 
 ### 2.4 공유 보드와 발신자 기록
 
-보드는 태스크, 메시지, 명명 세션을 JSON 파일 하나에 저장한다(8절).
+보드는 태스크, 메시지, 명명 세션을 `a2a_board.json`에 저장한다. 지휘권 리스는 `coord.json`에 따로 저장한다(8절). 두 파일은 서로 다른 flock으로 보호한다.
 
 **위임 한 번의 기록**
 1. 위임 도구를 부르면 호출자에서 대상 에이전트로 가는 `delegate` 메시지와 `task_id`가 생긴다.
@@ -119,10 +119,12 @@ AI 코딩 에이전트 셋(`agy`, `codex`, `claude`)을 함께 쓸 때 프로세
 **발신자 결정 순서**
 1. 도구 인자 `from_agent`(CLI `-from`)
 2. 환경변수 `A2A_AGENT_ID`
-3. MCP `initialize`의 `clientInfo.name` 추정(MCP 서버만). 이름에 `codex`가 있으면 `codex`, `antigravity`·`agy`·`gemini`가 있으면 `agy`, `claude`가 있으면 `claude`다.
+3. MCP `initialize`의 `clientInfo.name` 추정(MCP 서버만). 이름에 `codex`가 있으면 `codex`, `antigravity`·`agy`·`gemini`가 있으면 `agy`, `claude`·`claudedesktop`이 있으면 `claude`다.
 4. 모르면 `user`
 
 `reply`는 이 발신자 앞으로 쌓인다. `a2a_receive_messages`(CLI `inbox <id>`)로 읽는다. `agent_id`는 `agy`, `codex`, `claude`, `user` 중 하나다. 기본 동작은 읽지 않은 메시지 최대 20건을 돌려주고 읽음 처리한다.
+
+`agents.json`을 읽거나 파싱하지 못하면 내장 에이전트로 계속 동작한다. `a2a_discover_agents`와 `/.well-known/agent.json` 응답의 `registry_warnings`에 파일 경로와 오류를 남긴다.
 
 명명 세션은 에이전트별로 따로 저장된다. 같은 이름 `backend`를 AGY와 Claude Code에 각각 써도 별개 레코드다.
 
@@ -141,7 +143,7 @@ internal/
   acp/acptest/        테스트용 모의 ACP 에이전트(테스트 바이너리를 자식 프로세스로 재실행)
   codex/              codex exec/resume JSONL 러너
   claude/             claude -p JSON 러너
-  board/              공유 보드: 태스크·메시지·명명 세션, flock + 임시 파일 원자 저장
+  board/              공유 보드(태스크·메시지·명명 세션)와 coord.json 리스, 파일별 flock + 원자 저장
   agents/             A2A Agent Card(agy·codex·claude), 발신자 ID 목록·MCP 클라이언트 이름 추정
   mcp/                MCP stdio JSON-RPC 서버
   a2a/                A2A HTTP 서버(/.well-known/agent.json, /a2a)
@@ -218,8 +220,8 @@ MCP 서버(`a2a-acp-bridge mcp`)는 아래 9개 도구를 노출한다(2026-11-2
 
 | 도구 이름 | 언제 쓰나 | 필수 인자 | 선택 인자 |
 | :--- | :--- | :--- | :--- |
-| `a2a_discover_agents` | 사용 가능한 에이전트 카드(내장 `agy`·`codex`·`claude` + `agents.json` 동적 에이전트), 열린 명명 세션, 최근 태스크 10건을 확인할 때 | 없음 | 없음 |
-| `a2a_coordinator_lease` | 지휘권 리스를 조회·선점·갱신·이양할 때 (`action`: `status`/`claim`/`renew`/`handoff`) | `action` | `agent_id`, `expected_term`, `ttl_seconds`, `force`, `reason`, `to_agent`, `active_agents` |
+| `a2a_discover_agents` | 사용 가능한 에이전트 카드(내장 `agy`·`codex`·`claude` + `agents.json` 동적 에이전트), 열린 명명 세션, 최근 태스크 10건, 레지스트리 경고를 확인할 때 | 없음 | 없음 |
+| `a2a_coordinator_lease` | 지휘권 리스를 조회·선점·갱신·이양할 때 (`action`: `status`/`claim`/`renew`/`handoff`) | `action`; 변경 시 `agent_id` | `expected_term`, `ttl_seconds`, `force`, `reason`, `to_agent`, `active_agents` |
 | `acp_delegate_to_agy` | AGY(`agy acp`)에게 코드 작성·분석·리팩터링을 맡길 때 | `prompt` | `session_name`, `session_id`, `mode`, `model`, `async`, `cwd`, `from_agent` |
 | `a2a_delegate_to_codex` | Codex(`codex exec`)에게 교차 코드 리뷰나 비대화형 작업을 맡길 때 | `prompt` | `session_name`, `thread_id`, `sandbox`, `async`, `cwd`, `from_agent` |
 | `a2a_delegate_to_claude` | Claude Code(`claude -p`)에게 교차 리뷰나 분석을 맡길 때 | `prompt` | `session_name`, `session_id`, `permission_mode`, `async`, `cwd`, `from_agent` |
@@ -288,15 +290,16 @@ MCP 서버(`a2a-acp-bridge mcp`)는 아래 9개 도구를 노출한다(2026-11-2
 
 ### 5.3 `a2a_coordinator_lease` 지휘권 리스
 
-여러 에이전트 중 한 명만 지휘자(오케스트레이터)를 맡도록 보드에 `term`·`lease_until` 리스를 둔다. 모든 변경은 보드 flock 아래에서 `expected_term` 을 비교(CAS)한 뒤에만 반영된다.
+여러 에이전트 중 한 명만 지휘자(오케스트레이터)를 맡도록 `coord.json`에 `term`·`lease_until` 리스를 둔다. 모든 변경은 `coord.json.lock` flock 아래에서 `expected_term`을 비교(CAS)한 뒤에만 반영된다. 새 보드 저장은 `a2a_board.json`에 리스를 기록하지 않는다.
 
-- `status`: 현재 리스를 돌려준다. 리스가 없으면 `coordinator: null` 이다.
+- `status`: 현재 리스와 `vacant`, `active`, `expired`, `handed_off` 가운데 하나인 `status`를 돌려준다. 리스가 없으면 `coordinator: null`, `status: "vacant"`다.
 - `claim`: `expected_term` 이 현재 term 과 같을 때만 `term + 1` 로 선점한다. 활성 리스를 만료 전에 가져오려면 `force` 와 `reason` 이 함께 필요하다.
 - `renew`: 현재 지휘자만 `ttl_seconds`(CLI `-ttl`, 기본 60분)만큼 연장한다.
 - `handoff`: 현재 지휘자가 `to_agent` 에게 넘긴다. `to_agent` 를 비우면 누구나 claim 할 수 있는 개방 이양이 된다.
-- 실패 사유: term 불일치, 활성 리스, 만료된 리스 갱신·이양, 개방 이양 상태 재이양, 지휘자 아님, 사유 없는 force, 잘못된 에이전트 ID.
+- 변경에는 `agent_id`가 필요하다. `agent_id`가 없거나 `user`면 claim·renew·handoff를 거부한다. 식별되지 않은 여러 프로세스가 같은 `user`로 리스를 넘겨받는 문제를 막는다.
+- 실패 사유는 term 불일치, 활성 리스, 만료된 리스 갱신·이양이다. 개방 이양 재이양, 지휘자 아님, 사유 없는 force, 잘못된 ID, 익명 변경자도 거부한다.
 
-주의: #16 이전 바이너리로 떠 있는 브리지 프로세스가 보드에 쓰면 리스 필드가 지워진다(#20). 바이너리를 바꾼 뒤에는 각 에이전트의 MCP 서버를 포함해 모든 브리지 프로세스를 다시 띄운다. 호출자를 식별하지 못해 `user` 로 떨어진 프로세스끼리는 상호배제가 보장되지 않으니 `A2A_AGENT_ID` 나 `-agent` 를 준다.
+주의: #16 이전 바이너리가 `a2a_board.json`을 덮어써도 `coord.json` 리스는 유지된다(#20). 그 프로세스는 새 리스 저장소를 읽지 못한다. 바이너리를 바꾼 뒤 모든 브리지 프로세스를 다시 띄운다.
 
 ### 5.4 `acp_session_control` 동작(`action`) 목록
 
@@ -391,7 +394,7 @@ a2a-acp-bridge serve-a2a -addr 127.0.0.1:8765
 | `sessions`·`cancel`·`set-mode`·`set-model`·`close` | `-s`(또는 첫 위치 인자), `-mode`, `-model`, `-cwd`, `-timeout` |
 | `send` | `-from`, `-to`(기본 `codex`), `-intent`(기본 `delegate`), `-task-id` |
 | `inbox` | `-all`(읽은 메시지 포함), `-peek`(읽음 처리하지 않음), 위치 인자로 에이전트 ID 또는 `user` |
-| `coord` | 위치 인자 `status`·`claim`·`renew`·`handoff`, `-agent`(기본 `A2A_AGENT_ID` 또는 `user`), `-expected-term`(CAS 용 현재 term), `-ttl`(기본 60분), `-force`(만료 전 강제 승계, `-reason` 필요), `-reason`, `-to`(handoff 대상, 비우면 개방 이양), `-agents`(활성 에이전트 목록, 쉼표 구분) |
+| `coord` | 위치 인자 `status`·`claim`·`renew`·`handoff`, `-agent`(기본 `A2A_AGENT_ID`, 변경 시 필수), `-expected-term`(CAS 용 현재 term), `-ttl`(기본 60분), `-force`(만료 전 강제 승계, `-reason` 필요), `-reason`, `-to`(handoff 대상, 비우면 개방 이양), `-agents`(활성 에이전트 목록, 쉼표 구분) |
 | `watch` | `-agent`(기본 `A2A_AGENT_ID` 또는 `user`), `-interval`(기본 `1s`), `-all`, `-timeout`(기본 `0`, 종료 시그널까지) |
 | `serve-a2a` | `-addr`(기본 `127.0.0.1:8765`) |
 
@@ -439,7 +442,7 @@ curl -s http://127.0.0.1:8765/a2a \
 
 | 환경변수 | 기본값 | 설명 |
 | :--- | :--- | :--- |
-| `A2A_BRIDGE_STORE` | `~/.local/share/a2a-acp-bridge/a2a_board.json` | 태스크·메시지·명명 세션을 저장하는 JSON 파일 경로 |
+| `A2A_BRIDGE_STORE` | `~/.local/share/a2a-acp-bridge/a2a_board.json` | 태스크·메시지·명명 세션을 저장하는 JSON 파일 경로. 지휘권 리스는 같은 디렉터리의 `coord.json`에 저장한다 |
 | `A2A_ACP_COMMAND` | `agy acp --dangerously-skip-permissions` | ACP 워커가 실행할 명령어와 인자 재정의 |
 | `A2A_CODEX_COMMAND` | `codex` | Codex 위임 시 실행할 바이너리 명령 재정의. 공백으로 나눈 첫 토큰이 실행 파일이고 나머지는 인자 앞에 붙는다 |
 | `A2A_CODEX_HOME` | (없음) | Codex 자식 프로세스에만 적용할 `CODEX_HOME`. DeepSeek Codex에서 정식 Codex처럼 다른 홈의 Codex를 호출할 때 지정한다 |
@@ -447,7 +450,11 @@ curl -s http://127.0.0.1:8765/a2a \
 | `A2A_AGENTS_FILE` | `~/.local/share/a2a-acp-bridge/agents.json` | 내장 3종 외에 참여할 동적 에이전트 정의 파일. 같은 ID 면 내장 카드를 덮어쓴다 |
 | `A2A_AGENT_ID` | (없음) | 이 프로세스를 부르는 에이전트 ID(내장·동적 에이전트 slug). 위임·`send` 에 `from_agent`·`-from` 이 없으면 이 값을 발신자로 기록하고, 이것도 없으면 `user` 로 기록한다. MCP 서버는 이 값이 비어 있을 때만 initialize 의 `clientInfo.name` 으로 발신자를 추정한다 |
 
-보드 저장소(`a2a_board.json`)는 프로세스 내부 뮤텍스와 OS 파일 락(`a2a_board.json.lock`, `flock`)으로 다중 프로세스 동시 쓰기를 직렬화한다. `flock`은 Linux, macOS, BSD 계열에서 동작한다. 그 밖의 OS에서는 프로세스 내부 뮤텍스만 쓴다. 같은 디렉터리에 `os.CreateTemp`로 고유 임시 파일을 만들고 권한 `0600`으로 쓴 뒤 `os.Rename`으로 원자적 교체한다. 에이전트 셋이 각자 `mcp` 프로세스를 띄워 같은 보드를 써도 안전하다. 단 PR #6 이전 빌드는 임시 파일 경로가 고정이라 동시에 쓰면 rename이 실패하므로 그 이후 빌드를 쓴다.
+보드 저장소(`a2a_board.json`)와 지휘권 리스(`coord.json`)는 각각 내부 뮤텍스와 OS 파일 락으로 동시 쓰기를 직렬화한다. 락 파일은 `a2a_board.json.lock`과 `coord.json.lock`이다. `flock`은 Linux, macOS, BSD 계열에서 동작한다. 그 밖의 OS에서는 내부 뮤텍스만 쓴다.
+
+두 저장소 모두 같은 디렉터리에 `os.CreateTemp`로 임시 파일을 만든다. 권한 `0600`으로 쓰고 `os.Rename`으로 원자 교체한다. 에이전트 셋이 각자 `mcp` 프로세스를 띄워 같은 보드를 써도 안전하다. 단 PR #6 이전 빌드는 임시 파일 경로가 고정이라 동시에 쓰면 rename이 실패한다.
+
+`coord.json`이 없고 기존 `a2a_board.json`에 `coordinator`가 있으면 첫 coord 접근 때 한 번 이전한다. 두 파일의 락을 동시에 잡지 않으므로 기존 보드 쓰기와 교착되지 않는다. 이후 새 보드 저장은 `coordinator` 필드를 쓰지 않는다.
 
 ---
 

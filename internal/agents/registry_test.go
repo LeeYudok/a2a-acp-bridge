@@ -20,6 +20,7 @@ func TestRegistry(t *testing.T) {
 		"Antigravity":      "agy",
 		"gemini-cli":       "agy",
 		"claude-code":      "claude",
+		"claudedesktop":    "claude",
 		"notcodex":         "",
 		"myclaudeclient":   "",
 		"curl":             "",
@@ -28,6 +29,26 @@ func TestRegistry(t *testing.T) {
 		if got := FromClientName(name); got != want {
 			t.Errorf("FromClientName(%q) = %q, 원하는 값 %q", name, got, want)
 		}
+	}
+}
+
+func TestDynamicAgentsParseFailureIsVisible(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "agents.json")
+	if err := os.WriteFile(cfg, []byte(`[{"id":`), 0o600); err != nil {
+		t.Fatalf("깨진 agents.json 쓰기 실패: %v", err)
+	}
+	t.Setenv("A2A_AGENTS_FILE", cfg)
+
+	cards, warnings := CardsWithWarnings()
+	if !slices.Equal(IDs(), []string{"agy", "codex", "claude"}) {
+		t.Fatalf("파싱 실패 때 내장 카드가 유지되지 않음: cards=%v", cards)
+	}
+	if len(warnings) != 1 || warnings[0].Source != cfg || warnings[0].Message == "" {
+		t.Fatalf("agents.json 파싱 경고 불일치: %+v", warnings)
+	}
+	disc := Discover(t.TempDir(), nil, nil)
+	if len(disc.RegistryWarnings) != 1 {
+		t.Fatalf("Discovery 에 레지스트리 경고가 없음: %+v", disc.RegistryWarnings)
 	}
 }
 
