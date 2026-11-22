@@ -38,7 +38,8 @@ go build -o ~/.local/bin/a2a-acp-bridge ./cmd/a2a-acp-bridge
 
 - 작업마다 GitHub 이슈를 먼저 연다. 브랜치는 `batch/<agent>-<YYYYMMDD>-<8자리 hex>`(`openssl rand -hex 4`) 이다.
 - 커밋 제목은 `[<모델명>] <type>: <설명> (#N)` 이다. 커밋 작성자는 에이전트 계정(`claude-ai`·`codex-ai`·`agy-ai` `@doksam.com`)으로 한다.
-- PR 본문에 `Closes #N` 을 쓴다. 머지는 merge commit 으로 한다(squash 금지). 머지 판정은 사용자(LeeYudok)가 한다.
+- PR 본문에 `Closes #N` 을 쓴다. 머지는 merge commit 으로 한다(squash 금지).
+- **자동 머지 규칙(2026-11-22 사용자 승인)**: 타 에이전트 교차 리뷰(LGTM 또는 지적 사항 해소 확인)와 필수 CI 체크가 모두 통과한 PR은 현재 지휘자(오케스트레이터)가 merge commit(`--merge`, squash 금지)으로 즉시 머지하고 결과를 보고한다. 교차 리뷰 미완료·CI 실패·정책/보안 쟁점이 남은 PR만 사용자 확인을 기다린다.
 - `main` 에 직접 push 하지 않는다. 항상 `batch/*` 브랜치와 PR 로 올린다. `main` 은 GitHub 브랜치 보호(PR 필수, 관리자 포함, force push·삭제 금지)가 걸려 있고, 머지는 merge commit 만 허용한다(2026-11-22 public 전환 후 적용).
 - 혼자 하는 작업이 아니면 에이전트마다 자기 git worktree 를 쓴다. 남의 워크트리를 직접 고치지 않는다.
 
