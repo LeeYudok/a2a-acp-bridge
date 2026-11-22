@@ -109,6 +109,9 @@ func loadExtraCards(path string) ([]Card, []RegistryWarning) {
 		if c.Skills == nil {
 			c.Skills = []Skill{}
 		}
+		if c.Family != "" && !IsValidSlug(c.Family) {
+			c.Family = ""
+		}
 		out = append(out, c)
 	}
 	return out, nil
@@ -189,4 +192,17 @@ func matchesTokenBoundary(haystack, needle string) bool {
 
 func isAlphaNum(b byte) bool {
 	return (b >= 'a' && b <= 'z') || (b >= '0' && b <= '9')
+}
+
+// Families maps each registered agent ID to its family.
+func Families(cards []Card) map[string]string {
+	families := make(map[string]string, len(cards))
+	for _, card := range cards {
+		family := card.Family
+		if family == "" {
+			family = card.ID
+		}
+		families[card.ID] = family
+	}
+	return families
 }

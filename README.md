@@ -313,6 +313,39 @@ AGY의 상주 ACP 세션에만 적용한다. Codex와 Claude Code는 호출마�
 
 ---
 
+### 5.5 계열별 위임 풀
+
+기본 설정 파일은 `~/.local/share/a2a-acp-bridge/pool.json`이다. `A2A_POOL_FILE`로 경로를 바꿀 수 있다. 파일이 없으면 상한은 무제한이고 하한은 0이다.
+
+```json
+{
+  "max_total": 15,
+  "stale_after_seconds": 300,
+  "default": {"min": 0, "max": 2},
+  "families": {
+    "codex-glm": {"min": 1, "max": 3},
+    "codex-llmgw": {"min": 0, "max": 2},
+    "agy": {"min": 0, "max": 1}
+  }
+}
+```
+
+`agents.json`에서 같은 계열의 카드에 같은 `family`를 지정한다. 예를 들어 `codex-glm`과 `codex-glm-2` 카드 모두에 `"family": "codex-glm"`을 넣는다. 생략하면 카드 ID가 계열이다. 별도 Codex 라우트에서 위임을 실행하는 브리지에는 `A2A_CODEX_AGENT_ID`를 등록 카드 ID로 지정하고, 기존 `A2A_CODEX_COMMAND`·`A2A_CODEX_HOME`으로 실행기를 구성한다.
+
+동기·비동기 위임은 같은 보드의 최근 `working` 태스크를 센다. 실행 중에는 60초마다 태스크를 갱신한다. 마지막 갱신이 기본 300초 이상 지난 태스크는 슬롯을 차지하지 않는다. 이 기준은 `stale_after_seconds`(최소 120초)로 조절한다. 계열 상한이나 전체 상한에 닿으면 새 태스크를 만들기 전에 오류를 반환한다. 여러 브리지에서 한도를 공유하려면 같은 보드·풀 설정·에이전트 등록 파일을 사용한다. 하한은 상태 표시와 경고에만 쓰이며, 에이전트 프로세스는 운영자가 띄운다. 브리지가 종료되어 갱신이 끊긴 태스크는 상태 응답의 `stale`에 집계한다. 동기 위임이 끝난 뒤 보드 저장이 실패하면 결과에 `board_warning`을 함께 반환한다.
+
+`a2a_pool`과 HTTP `a2a/pool`의 `status`는 계열별 `min`, `max`, `running`, `stale`, `free_slots`, `below_min`을 반환한다. `free_slots`는 전체 상한도 반영하고, 한도가 없으면 `null`이다. 에이전트 디스커버리와 `/monitor/snapshot`에서는 같은 형식의 `pool` 블록을 제공한다.
+
+`set`에는 `family`·`min`·`max`를 함께 전달하거나 `max_total`만 전달한다. `0 ≤ min ≤ max`, `max ≥ 1`, `max_total ≥ 1`이어야 한다.
+
+```sh
+a2a-acp-bridge pool status
+a2a-acp-bridge pool set codex-glm --min 1 --max 3
+a2a-acp-bridge pool set --max-total 15
+```
+
+로컬 CLI 변경은 기본적으로 `user` 권한을 쓴다. `A2A_AGENT_ID`를 지정한 CLI와 MCP 서버는 해당 ID가 `user`이거나 활성 지휘권 리스의 보유자일 때 변경할 수 있다. MCP의 클라이언트 이름과 요청의 발신자 필드는 변경 권한에 영향을 주지 않는다. HTTP 변경은 `A2A_POOL_WRITE_TOKEN`과 일치하는 `Authorization: Bearer …` 헤더가 있을 때 `user` 권한으로 처리한다.
+
 ## 6. CLI 명령 레퍼런스
 
 ### 기존 AGY 대화에 연결
@@ -423,6 +456,7 @@ a2a-acp-bridge serve-a2a -addr 127.0.0.1:8765
 | `acp/control` | `acp_session_control` |
 | `a2a/codex` | `a2a_delegate_to_codex` |
 | `a2a/claude` | `a2a_delegate_to_claude` |
+| `a2a/pool` (또는 `a2a_pool`) | `a2a_pool` |
 | `tasks/send` | `a2a_send_message` |
 | `tasks/get` | `a2a_task_status` |
 
@@ -445,6 +479,9 @@ curl -s http://127.0.0.1:8765/a2a \
 
 | 환경변수 | 기본값 | 설명 |
 | :--- | :--- | :--- |
+| `A2A_POOL_FILE` | `~/.local/share/a2a-acp-bridge/pool.json` | 계열별 하한·상한과 전체 상한 설정 |
+| `A2A_CODEX_AGENT_ID` | `codex` | 위임을 실행하는 Codex 라우트의 등록 카드 ID |
+| `A2A_POOL_WRITE_TOKEN` | 미설정 | HTTP 풀 변경의 Bearer 자격 증명 |
 | `A2A_BRIDGE_STORE` | `~/.local/share/a2a-acp-bridge/a2a_board.json` | 태스크·메시지·명명 세션을 저장하는 JSON 파일 경로. 지휘권 리스는 같은 디렉터리의 `coord.json`에 저장한다 |
 | `A2A_ACP_COMMAND` | `agy acp --dangerously-skip-permissions` | ACP 워커가 실행할 명령어와 인자 재정의 |
 | `A2A_CODEX_COMMAND` | `codex` | Codex 위임 시 실행할 바이너리 명령 재정의. 공백으로 나눈 첫 토큰이 실행 파일이고 나머지는 인자 앞에 붙는다 |

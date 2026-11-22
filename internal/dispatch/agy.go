@@ -15,6 +15,7 @@ type AgyDelegateResult struct {
 	ToolCalls     []string `json:"tool_calls"`
 	StopReason    string   `json:"stop_reason"`
 	ReusedProcess bool     `json:"reused_process"`
+	BoardWarning  string   `json:"board_warning,omitempty"`
 	Async         bool     `json:"async,omitempty"`
 }
 
@@ -40,7 +41,7 @@ func (d *Dispatcher) callDelegateAgy(ctx context.Context, args map[string]any) (
 		return AgyDelegateResult{}, err
 	}
 
-	msg, err := d.Board.SendMessage(turn.from, "agy", turn.prompt, "delegate", "")
+	msg, err := d.startDelegation(turn.from, "agy", turn.prompt, turn.sid)
 	if err != nil {
 		return AgyDelegateResult{}, err
 	}
@@ -48,7 +49,6 @@ func (d *Dispatcher) callDelegateAgy(ctx context.Context, args map[string]any) (
 	if !boolArg(args, "async", false) {
 		return d.executeAgyTurn(ctx, turn)
 	}
-	_, _ = d.Board.UpsertTask(turn.from, "agy", turn.prompt, "working", turn.taskID, turn.sid)
 	d.asyncWG.Add(1)
 	go func() {
 		defer d.asyncWG.Done()
@@ -69,6 +69,8 @@ func (d *Dispatcher) callDelegateAgy(ctx context.Context, args map[string]any) (
 }
 
 func (d *Dispatcher) executeAgyTurn(ctx context.Context, t agyTurn) (AgyDelegateResult, error) {
+	stopHeartbeat := d.keepDelegationAlive(ctx, t.taskID)
+	defer stopHeartbeat()
 	pool, err := d.pool()
 	if err != nil {
 		return AgyDelegateResult{}, err
@@ -81,14 +83,17 @@ func (d *Dispatcher) executeAgyTurn(ctx context.Context, t agyTurn) (AgyDelegate
 	if t.sessionName != "" {
 		_, _ = d.Board.UpsertSession(t.sessionName, "agy", res.SessionID, t.cwd, t.mode, t.model)
 	}
-	_, _ = d.Board.SendMessage("agy", t.from, res.Response, "reply", t.taskID)
-	_, _ = d.Board.UpsertTask(t.from, "agy", t.prompt, "completed", t.taskID, res.SessionID)
+	warning := ""
+	if _, err := d.Board.CompleteDelegation("agy", t.from, res.Response, t.taskID, res.SessionID); err != nil {
+		warning = err.Error()
+	}
 	return AgyDelegateResult{
 		Agent:         "agy",
 		Protocol:      agyProtocol,
 		SessionID:     res.SessionID,
 		SessionName:   t.sessionName,
 		TaskID:        t.taskID,
+		BoardWarning:  warning,
 		Response:      res.Response,
 		ToolCalls:     res.ToolCalls,
 		StopReason:    res.StopReason,

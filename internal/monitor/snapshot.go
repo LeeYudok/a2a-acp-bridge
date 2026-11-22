@@ -12,7 +12,7 @@ import (
 
 const (
 	// DefaultStaleAfter is the point where a working task is reported as stale.
-	DefaultStaleAfter = 5 * time.Minute
+	DefaultStaleAfter = board.DefaultPoolStaleAfter
 	taskLimit         = 50
 	sessionLimit      = 30
 )
@@ -64,21 +64,25 @@ type Coordinator struct {
 
 // Snapshot is a read-only monitoring response. Empty collections are encoded as [].
 type Snapshot struct {
-	GeneratedAt       string       `json:"generated_at"`
-	StaleAfterSeconds int          `json:"stale_after_seconds"`
-	Agents            []Agent      `json:"agents"`
-	Tasks             []Task       `json:"tasks"`
-	Sessions          []Session    `json:"sessions"`
-	Coordinator       *Coordinator `json:"coordinator,omitempty"`
+	Pool              board.PoolStatus `json:"pool"`
+	GeneratedAt       string           `json:"generated_at"`
+	StaleAfterSeconds int              `json:"stale_after_seconds"`
+	Agents            []Agent          `json:"agents"`
+	Tasks             []Task           `json:"tasks"`
+	Sessions          []Session        `json:"sessions"`
+	Coordinator       *Coordinator     `json:"coordinator,omitempty"`
 }
 
 // Capture reads the shared board without changing it and builds a monitoring snapshot.
 func Capture(b *board.Board, now time.Time, staleAfter time.Duration) (Snapshot, error) {
-	raw, err := b.Snapshot()
+	cards := agents.Cards()
+	raw, pool, err := b.SnapshotWithPool(agents.Families(cards))
 	if err != nil {
 		return Snapshot{}, err
 	}
-	return Build(raw, agents.Cards(), now, staleAfter), nil
+	out := Build(raw, cards, now, staleAfter)
+	out.Pool = pool
+	return out, nil
 }
 
 // Build converts board and registry data into the public monitoring DTO.
