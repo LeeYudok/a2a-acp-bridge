@@ -211,3 +211,44 @@ func runAskClaudeCmd(ctx context.Context, d *dispatch.Dispatcher, cwd string, re
 	})
 	return printResult(res, err)
 }
+
+func runAskAgentCmd(ctx context.Context, d *dispatch.Dispatcher, cwd string, rest []string) error {
+	fs := flag.NewFlagSet("ask-agent", flag.ContinueOnError)
+	agentID := fs.String("agent", "", "대상 에이전트 ID (예: pi, hermes, codex, claude, agy)")
+	sid := fs.String("session-id", "", "이어갈 세션 ID")
+	sname := fs.String("s", "", "acpx 스타일의 명명 세션")
+	sandbox := fs.String("sandbox", "", "샌드박스 모드 (read-only|workspace-write)")
+	permMode := fs.String("permission-mode", "", "Claude 권한 모드 (plan|default|acceptEdits)")
+	mode := fs.String("mode", "", "ACP 실행 모드 (auto|accept-edits|plan)")
+	model := fs.String("model", "", "모델 ID")
+	noWait := fs.Bool("no-wait", false, "비동기 큐 등록 후 즉시 반환")
+	workDir := fs.String("cwd", cwd, "작업 디렉터리")
+	timeout := fs.Duration("timeout", defaultCommandTimeout, "실행 타임아웃 (예: 3m, 10m)")
+	from := fs.String("from", "", "보드에 기록할 발신자")
+	if err := fs.Parse(rest); err != nil {
+		return err
+	}
+	if *agentID == "" || fs.NArg() < 1 {
+		return fmt.Errorf("ask-agent: --agent 와 프롬프트 인자가 필요합니다")
+	}
+	cmdCtx, cancel, err := withCommandTimeout(ctx, *timeout)
+	if err != nil {
+		return fmt.Errorf("ask-agent: %w", err)
+	}
+	defer cancel()
+	d.AsyncTimeout = *timeout
+	res, err := d.CallTool(cmdCtx, "a2a_delegate_to_agent", map[string]any{
+		"agent_id":        *agentID,
+		"prompt":          fs.Arg(0),
+		"session_id":      *sid,
+		"session_name":    *sname,
+		"sandbox":         *sandbox,
+		"permission_mode": *permMode,
+		"mode":            *mode,
+		"model":           *model,
+		"async":           *noWait,
+		"cwd":             explicitFlag(fs, "cwd", *workDir),
+		"from_agent":      *from,
+	})
+	return printResult(res, err)
+}
