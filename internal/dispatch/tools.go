@@ -63,6 +63,24 @@ func Tools() []ToolSchema {
 			}, "action"),
 		},
 		{
+			Name:        "a2a_delegate_to_agent",
+			Description: "등록된 Agent Card의 executor 설정으로 에이전트에 작업을 위임합니다. ACP 상주 세션, Codex, Claude, Pi(멀티턴/세션 재개) 및 일반 CLI를 같은 경로로 실행합니다.",
+			InputSchema: objectSchema(map[string]any{
+				"agent_id":        enumProp(agents.IDs()),
+				"prompt":          strProp("에이전트에게 전달할 프롬프트/작업 지시"),
+				"session_id":      strProp("이어갈 세션 ID (선택)"),
+				"session_name":    strProp("acpx 스타일의 논리 세션 이름 (선택)"),
+				"thread_id":       strProp("이어갈 Codex 스레드 ID (선택)"),
+				"mode":            enumProp(modeEnum),
+				"model":           strProp("세션에 적용할 모델 ID (선택)"),
+				"permission_mode": enumProp(claude.PermissionModes),
+				"sandbox":         enumProp([]string{"read-only", "workspace-write"}),
+				"async":           map[string]any{"type": "boolean", "description": "true면 백그라운드 큐에 넣고 즉시 task_id 반환"},
+				"cwd":             strProp("작업 디렉터리 (선택)"),
+				"from_agent":      fromProp(),
+			}, "agent_id", "prompt"),
+		},
+		{
 			Name:        "acp_delegate_to_agy",
 			Description: "ACP(상주 세션 풀·자동 재연결)를 통해 AGY에게 작업을 위임합니다. session_name(-s)과 async(--no-wait) 큐잉을 지원합니다.",
 			InputSchema: objectSchema(map[string]any{

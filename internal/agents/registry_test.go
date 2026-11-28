@@ -88,4 +88,12 @@ func TestDynamicAgentsFileLoadsCustomSlugs(t *testing.T) {
 	if IsValidSlug("") || IsValidSlug("-bad") || IsValidSlug("Bad") || !IsValidSlug("hermes-1") {
 		t.Fatal("IsValidSlug 판정 오류")
 	}
+	hermesCard, ok := Find("hermes")
+	if !ok || hermesCard.Executable {
+		t.Fatalf("hermes without executor should not be executable: %+v ok=%v", hermesCard, ok)
+	}
+	agyCard, ok := Find("agy")
+	if !ok || !agyCard.Executable {
+		t.Fatalf("builtin agy should be executable: %+v ok=%v", agyCard, ok)
+	}
 }

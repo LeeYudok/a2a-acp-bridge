@@ -44,6 +44,8 @@ type Dispatcher struct {
 	// AsyncTimeout 은 async(--no-wait) 작업의 실행 시간 상한이다. 0 이면 상한이 없다(MCP 서버 기본).
 	AsyncTimeout time.Duration
 	asyncWG      sync.WaitGroup
+	extraPoolsMu sync.Mutex
+	extraPools   map[string]*acp.SessionPool
 }
 
 // Wait 는 비동기(--no-wait)로 큐잉된 모든 백그라운드 작업이 끝날 때까지 기다린다
@@ -57,6 +59,12 @@ func (d *Dispatcher) Close() {
 	if d.Pool != nil {
 		d.Pool.CloseAll()
 	}
+	d.extraPoolsMu.Lock()
+	for _, p := range d.extraPools {
+		p.CloseAll()
+	}
+	d.extraPools = nil
+	d.extraPoolsMu.Unlock()
 }
 
 // caller 는 요청의 from_agent, Dispatcher.Caller, user 순으로 발신자를 정한다
@@ -101,6 +109,8 @@ func (d *Dispatcher) CallTool(ctx context.Context, name string, args map[string]
 		return d.callDelegateCodex(ctx, args)
 	case "a2a_delegate_to_claude":
 		return d.callDelegateClaude(ctx, args)
+	case "a2a_delegate_to_agent":
+		return d.callDelegateAgent(ctx, args)
 	case "acp_session_control":
 		return d.callSessionControl(args)
 	case "a2a_send_message":

@@ -9,6 +9,13 @@ type Skill struct {
 	Name string `json:"name"`
 }
 
+// Executor 는 에이전트 실행기 설정이다
+type Executor struct {
+	Type       string   `json:"type"`
+	Command    []string `json:"command"`
+	PromptMode string   `json:"prompt_mode,omitempty"`
+}
+
 // Card 는 A2A 표준 에이전트 메타데이터다
 type Card struct {
 	Family       string          `json:"family,omitempty"`
@@ -19,6 +26,8 @@ type Card struct {
 	Endpoint     string          `json:"endpoint"`
 	Capabilities map[string]bool `json:"capabilities"`
 	Skills       []Skill         `json:"skills"`
+	Executor     *Executor       `json:"executor,omitempty"`
+	Executable   bool            `json:"executable"`
 }
 
 // Discovery 는 a2a_discover_agents 도구와 /.well-known/agent.json 의 응답이다
@@ -75,6 +84,7 @@ func builtinCards() []Card {
 				{ID: "architecture-review", Name: "설계 및 아키텍처 검증"},
 				{ID: "acp-session", Name: "ACP 상주 세션·취소·모드 제어"},
 			},
+			Executor: &Executor{Type: "acp", Command: []string{"agy", "acp", "--dangerously-skip-permissions"}},
 		},
 		{
 			ID:        "codex",
@@ -94,6 +104,7 @@ func builtinCards() []Card {
 				{ID: "task-execution", Name: "비대화형 작업 수행 및 검증"},
 				{ID: "thread-resume", Name: "스레드 기반 다중 턴 협업"},
 			},
+			Executor: &Executor{Type: "codex", Command: []string{"codex"}},
 		},
 		{
 			ID:        "claude",
@@ -112,6 +123,7 @@ func builtinCards() []Card {
 				{ID: "code-review", Name: "교차 코드 리뷰 및 구조 개선"},
 				{ID: "task-execution", Name: "보드 요청 수행 및 이어받기"},
 			},
+			Executor: &Executor{Type: "claude", Command: []string{"claude"}},
 		},
 	}
 }

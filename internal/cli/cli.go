@@ -18,7 +18,7 @@ import (
 
 const defaultCommandTimeout = 3 * time.Minute
 
-const usage = "서브커맨드가 필요합니다 (mcp | serve-a2a | cards | ask-agy | agy-sessions | ask-codex | ask-claude | sessions | cancel | set-mode | set-model | close | send | inbox | coord | pool | watch)"
+const usage = "서브커맨드가 필요합니다 (mcp | serve-a2a | cards | ask-agent | ask-agy | agy-sessions | ask-codex | ask-claude | sessions | cancel | set-mode | set-model | close | send | inbox | coord | pool | watch)"
 
 // Run 은 os.Args[1:] 를 받아 서브커맨드를 실행한다
 func Run(args []string) error {
@@ -56,6 +56,8 @@ func dispatchSubcommand(ctx context.Context, d *dispatch.Dispatcher, cwd, sub st
 		defer cancel()
 		res, err := d.CallTool(cmdCtx, "a2a_discover_agents", map[string]any{})
 		return printResult(res, err)
+	case "ask-agent":
+		return runAskAgentCmd(ctx, d, cwd, rest)
 	case "ask-agy":
 		return runAskAgyCmd(ctx, d, cwd, rest)
 	case "agy-sessions":

@@ -58,22 +58,34 @@ func Cards() []Card {
 func CardsWithWarnings() ([]Card, []RegistryWarning) {
 	base := builtinCards()
 	extra, warnings := loadExtraCards(ExtraAgentsPath())
-	if len(extra) == 0 {
-		return base, warnings
-	}
-	byIdx := make(map[string]int, len(base))
-	for i, c := range base {
-		byIdx[c.ID] = i
-	}
-	for _, c := range extra {
-		if idx, ok := byIdx[c.ID]; ok {
-			base[idx] = c
-			continue
+	if len(extra) > 0 {
+		byIdx := make(map[string]int, len(base))
+		for i, c := range base {
+			byIdx[c.ID] = i
 		}
-		byIdx[c.ID] = len(base)
-		base = append(base, c)
+		for _, c := range extra {
+			if idx, ok := byIdx[c.ID]; ok {
+				base[idx] = c
+				continue
+			}
+			byIdx[c.ID] = len(base)
+			base = append(base, c)
+		}
+	}
+	for i := range base {
+		base[i].Executable = base[i].Executor != nil && len(base[i].Executor.Command) > 0
 	}
 	return base, warnings
+}
+
+// Find 는 ID 에 해당하는 에이전트 카드를 반환한다.
+func Find(id string) (Card, bool) {
+	for _, c := range Cards() {
+		if c.ID == id {
+			return c, true
+		}
+	}
+	return Card{}, false
 }
 
 func loadExtraCards(path string) ([]Card, []RegistryWarning) {
